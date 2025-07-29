@@ -90,9 +90,9 @@
                 <div class="card mb-1">
                     <div class="card-header">Tools</div>
                     <div class="card-body">
-                        <div class="btn-group" role="group" aria-label="Tools">
-                            <input type="radio" class="btn-check" name="btnradio" id="select" autocomplete="off"
-                                   checked>
+                        <!-- All Tools -->
+                        <div class="btn-group mb-2" role="group" aria-label="Tools Row 1">
+                            <input type="radio" class="btn-check" name="btnradio" id="select" autocomplete="off" checked>
                             <label class="btn btn-outline-primary btn-sm" for="select">Select</label>
 
                             <input type="radio" class="btn-check" name="btnradio" id="redx" autocomplete="off">
@@ -102,14 +102,53 @@
                             <label class="btn btn-outline-primary btn-sm" for="dp1">DP</label>
 
                             <input type="radio" class="btn-check" name="btnradio" id="point" autocomplete="off">
-                            <label class="btn btn-outline-primary btn-sm" for="point">Point drop</label>
-
-                            <input v-if="config && config.callsign" type="radio" class="btn-check"
-                                   name="btnradio" id="me"
-                                   autocomplete="off">
-                            <label v-if="config && config.callsign" class="btn btn-outline-primary btn-sm"
-                                   for="me">Me</label>
+                            <label class="btn btn-outline-primary btn-sm" for="point">Point</label>
                         </div>
+
+                        <div class="btn-group mb-2" role="group" aria-label="Tools Row 2">
+                            <input type="radio" class="btn-check" name="btnradio" id="fire" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="fire">Fire</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="water" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="water">Water</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="observation" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="observation">Observe</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="hazard" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="hazard">Hazard</label>
+                        </div>
+
+                        <div class="btn-group mb-2" role="group" aria-label="Tools Row 3" v-if="config && config.callsign">
+                            <input type="radio" class="btn-check" name="btnradio" id="me" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="me">Me</label>
+                        </div>
+
+                        <!-- Multi-Select Controls -->
+                        <div class="mb-2">
+                            <button class="btn btn-sm w-100" 
+                                    :class="multiSelectMode ? 'btn-primary' : 'btn-outline-primary'"
+                                    @click="toggleMultiSelect()">
+                                {{ multiSelectMode ? 'Exit Multi-Select' : 'Multi-Select Mode' }}
+                            </button>
+                            <div v-if="multiSelectMode" class="mt-1">
+                                <span class="badge bg-info">{{ selectedUnits.size }} selected</span>
+                                <button v-if="selectedUnits.size > 0" 
+                                        class="btn btn-danger btn-sm ms-1" 
+                                        @click="deleteSelectedUnits()">
+                                    Delete Selected
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Bulk Actions -->
+                        <div class="mb-2">
+                            <button class="btn btn-warning btn-sm w-100" @click="clearAllPoints()">
+                                Clear All Points
+                            </button>
+                        </div>
+
+                        <!-- Tool Status Display -->
                         <div v-if="getTool('redx')" class="mt-1">
                             <span class="badge bg-danger">RedX</span>: {{ printCoordsll(getTool('redx').getLatLng()) }}
                             <span class="badge rounded-pill bg-success" style="cursor:default;"
@@ -268,6 +307,8 @@
                                     <option value="b-m-p-w-GOTO">Waypoint</option>
                                     <option value="b-m-p-s-p-op">OP</option>
                                     <option value="b-m-p-a">Aim</option>
+                                    <option value="b-r-f-h-c">Fire/Hazard</option>
+                                    <option value="b-m-p-w">Water Source</option>
                                 </select>
                             </div>
                         </div>

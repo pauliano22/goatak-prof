@@ -1,7 +1,7 @@
 <div id="app" class="vh-100 d-flex flex-column">
     <nav class="navbar navbar-expand-md navbar-dark bg-dark">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">GoATAK server <span v-if="config">{{ config.version }}</span></a>
+            <a class="navbar-brand" href="#">GoATAK client <span v-if="config">{{ config.version }}</span></a>
             <span class="badge rounded-pill"
                   :class="{ 'text-bg-success': status == 'connected', 'text-bg-secondary': status == '', 'text-bg-danger': status == 'error'}">&nbsp;</span>
             <div class="collapse navbar-collapse" id="navbarCollapse">
@@ -48,12 +48,20 @@
                             </li>
                         </ul>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#messages">
-                            Chat <span class="badge rounded-pill"
-                                       :class="msgNum(false) == 0?'text-bg-success':'text-bg-warning'">
-                            {{ msgNum(false) }}/{{ msgNum(true) }}
-                        </span></a>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDarkDropdownMenuLink4" role="button"
+                           data-bs-toggle="dropdown" aria-expanded="false">
+                            Messages <span class="badge rounded-pill"
+                                           :class="msgNum(false) == 0?'text-bg-success':'text-bg-warning'">{{ msgNum(false) }}/{{ msgNum(true) }}</span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDarkDropdownMenuLink4">
+                            <li v-for="m in Object.values(messages)">
+                                <a class="dropdown-item" href="#" @click="openChat(m.uid, m.from)">
+                                    {{ m.from }} <span class="badge rounded-pill"
+                                                       :class="msgNum1(m.uid, false) == 0?'text-bg-success':'text-bg-warning'">{{ msgNum1(m.uid,false) }}/{{ msgNum1(m.uid,true) }}</span>
+                                </a>
+                            </li>
+                        </ul>
                     </li>
                 </ul>
             </div>
@@ -82,14 +90,65 @@
                 <div class="card mb-1">
                     <div class="card-header">Tools</div>
                     <div class="card-body">
-                        <div class="btn-group" role="group" aria-label="Tools">
-                            <input type="radio" class="btn-check" name="btnradio" id="select" autocomplete="off"
-                                   checked>
+                        <!-- All Tools -->
+                        <div class="btn-group mb-2" role="group" aria-label="Tools Row 1">
+                            <input type="radio" class="btn-check" name="btnradio" id="select" autocomplete="off" checked>
                             <label class="btn btn-outline-primary btn-sm" for="select">Select</label>
 
                             <input type="radio" class="btn-check" name="btnradio" id="redx" autocomplete="off">
                             <label class="btn btn-outline-primary btn-sm" for="redx">Red-x</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="dp1" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="dp1">DP</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="point" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="point">Point</label>
                         </div>
+
+                        <div class="btn-group mb-2" role="group" aria-label="Tools Row 2">
+                            <input type="radio" class="btn-check" name="btnradio" id="fire" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="fire">Fire</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="water" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="water">Water</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="observation" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="observation">Observe</label>
+
+                            <input type="radio" class="btn-check" name="btnradio" id="hazard" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="hazard">Hazard</label>
+                        </div>
+
+                        <div class="btn-group mb-2" role="group" aria-label="Tools Row 3" v-if="config && config.callsign">
+                            <input type="radio" class="btn-check" name="btnradio" id="me" autocomplete="off">
+                            <label class="btn btn-outline-primary btn-sm" for="me">Me</label>
+                        </div>
+
+                        <!-- Multi-Select Controls -->
+                        <div class="mb-2">
+                            <button class="btn btn-sm w-100" 
+                                    :class="multiSelectMode ? 'btn-primary' : 'btn-outline-primary'"
+                                    @click="toggleMultiSelect()">
+                                {{ multiSelectMode ? 'Exit Multi-Select' : 'Multi-Select Mode' }}
+                            </button>
+                            <div v-if="multiSelectMode" class="mt-1">
+                                <span class="badge bg-info">{{ selectedUnits.size }} selected</span>
+                                <button v-if="selectedUnits.size > 0" 
+                                        class="btn btn-danger btn-sm ms-1" 
+                                        @click="deleteSelectedUnits()">
+                                    Delete Selected
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Bulk Actions -->
+                        <div class="mb-2">
+                            <button class="btn btn-warning btn-sm w-100" @click="clearAllPoints()">
+                                Clear All Points
+                            </button>
+                        </div>
+
+                        <!-- Tool Status Display -->
                         <div v-if="getTool('redx')" class="mt-1">
                             <span class="badge bg-danger">RedX</span>: {{ printCoordsll(getTool('redx').getLatLng()) }}
                             <span class="badge rounded-pill bg-success" style="cursor:default;"
@@ -124,6 +183,21 @@
                                  v-if="locked_unit_uid == current_unit.uid"
                                  @click="locked_unit_uid=''"/>
                         </div>
+                        <div v-if="current_unit.unit.category === 'contact'">
+                            <button class="btn btn-sm btn-outline-primary ms-1"
+                                    @click="openChat(current_unit.uid, current_unit.unit.callsign);"><i
+                                    class="bi bi-chat-text-fill"></i></button>
+                        </div>
+                        <div v-else>
+                            <button class="btn btn-sm btn-outline-primary ms-1" data-bs-toggle="modal"
+                                    data-bs-target="#edit">
+                                <i class="bi bi-pencil-square"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger ms-1" @click="deleteCurrentUnit">
+                                <i class="bi bi-trash3-fill"></i>
+                            </button>
+                        </div>
+
                     </div>
                     <div class="card-body">
                         <b>UID:</b> {{ current_unit.uid }}<br/>
@@ -167,11 +241,15 @@
         <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="staticBackdropLabel">Chat messages</h5>
+                    <h5 class="modal-title" id="staticBackdropLabel">Chat messages {{ chatroom }}
+                        <span v-if="getStatus(chat_uid)" class="badge"
+                              :class="getStatus(chat_uid) == 'Online' ?'text-bg-success':'text-bg-secondary'">
+                            {{ getStatus(chat_uid) }}</span>
+                    </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <div v-for="m in messages" class="alert alert-secondary">
+                    <div v-for="m in getMessages()" class="alert alert-secondary">
                         <span class="badge text-bg-secondary">{{ dt(m.time) }}</span>
                         <span class="badge mx-1"
                               :class="m.from_uid == config.uid ? 'text-bg-success':'text-bg-info'">{{ m.from || m.from_uid }}</span>
@@ -179,7 +257,110 @@
                     </div>
                 </div>
                 <div class="modal-footer">
+                    <form @submit.prevent="sendMessage">
+                        <input type="text" class="form-control" id="message-text" v-model="chat_msg"/>
+                    </form>
+                    <button type="button" class="btn btn-primary" @click="sendMessage">Send message</button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="edit" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1"
+         aria-labelledby="staticBackdropLabel1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="staticBackdropLabel1">Edit point</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form>
+                        <div class="row m-2">
+                            <label for="ed-callsign" class="col-auto col-form-label">Callsign</label>
+                            <div class="col-auto">
+                                <input class="form-control" v-model="form_unit.callsign" id="ed-callsign"
+                                       placeholder="callsign">
+                            </div>
+
+                            <div class="btn-group col-4" role="group" aria-label="Type">
+                                <input type="radio" class="btn-check" name="btnradio" value="point"
+                                       v-model="form_unit.category" id="ed-point">
+                                <label class="btn btn-outline-primary btn-sm" for="ed-point">Point</label>
+
+                                <input type="radio" class="btn-check" name="btnradio" value="unit"
+                                       v-model="form_unit.category" id="ed-unit">
+                                <label class="btn btn-outline-primary btn-sm" for="ed-unit">Unit</label>
+                            </div>
+
+                            <div class="form-check col-auto">
+                                <input class="form-check-input" type="checkbox" id="ed-send" v-model="form_unit.send"/>
+                                <label class="form-check-label" for="ed-send">Send</label>
+                            </div>
+                        </div>
+                        <div class="row m-2" v-if="form_unit.category == 'point'">
+                            <div class="col">
+                                <label class="form-label col-auto" for="ed-type">Type</label>
+                                <select class="form-select" id="ed-type" v-model="form_unit.type">
+                                    <option value="b-m-p-s-m">Spot</option>
+                                    <option value="b-m-p-w-GOTO">Waypoint</option>
+                                    <option value="b-m-p-s-p-op">OP</option>
+                                    <option value="b-m-p-a">Aim</option>
+                                    <option value="b-r-f-h-c">Fire/Hazard</option>
+                                    <option value="b-m-p-w">Water Source</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row m-2" v-if="form_unit.category == 'unit'">
+                            <div class="col">
+                                <label class="my-1 mr-2 col-6" for="ed-aff">Affilation</label>
+                                <select class="form-select my-1 mr-sm-2" id="ed-aff" v-model="form_unit.aff">
+                                    <option value="h">Hostile</option>
+                                    <option value="f">Friend</option>
+                                    <option value="n">Neutral</option>
+                                    <option value="u">Unknown</option>
+                                    <option value="s">Suspect</option>
+                                </select>
+                            </div>
+                            <div class="col row my-1 mr-sm-2" v-if="form_unit.root_sidc">
+                                <label class="form-label" for="ed-subtype">Type</label>
+                                <div class="col">
+                                    <div class="input-group">
+                                        <button type="button" class="btn btn-sm btn-secondary"
+                                                :disabled="form_unit.root_sidc.code === ''"
+                                                @click="setFormRootSidc(getRootSidc(form_unit.root_sidc.code).code)">
+                                            &lt;
+                                        </button>
+                                        <select class="form-select" id="ed-subtype"
+                                                v-model="form_unit.subtype">
+                                            <option v-for="t in form_unit.root_sidc.next" :value="t.code">{{ t.name }}
+                                            </option>
+                                        </select>
+                                        <button type="button" class="btn btn-sm btn-secondary"
+                                                :disabled="! getSidc(form_unit.subtype).next"
+                                                @click="setFormRootSidc(form_unit.subtype)">&gt;
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row m-2">
+                            <div class="col-12">
+                                <label for="ed-remarks">Remarks</label>
+                                <textarea id="ed-remarks" class="form-control" id="exampleFormControlTextarea1" rows="3"
+                                          v-model="form_unit.text"></textarea>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" @click="cancelEditForm">
+                        Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal" @click="saveEditForm">
+                        Save
+                    </button>
                 </div>
             </div>
         </div>

@@ -23,6 +23,8 @@ const app = Vue.createApp({
             chatroom: "",
             chat_uid: "",
             chat_msg: "",
+            multiSelectMode: false,
+            selectedUnits: new Set(),
         }
     },
 
@@ -38,7 +40,6 @@ const app = Vue.createApp({
 
         if (supportsWebSockets) {
             this.connect();
-            // setInterval(this.fetchAllUnits, 60000);
         }
 
         this.renew();
@@ -298,7 +299,8 @@ const app = Vue.createApp({
         },
 
         modeIs: function (s) {
-            return document.getElementById(s).checked === true;
+            const element = document.getElementById(s);
+            return element ? element.checked : false;
         },
 
         mouseMove: function (e) {
@@ -306,6 +308,25 @@ const app = Vue.createApp({
         },
 
         mapClick: function (e) {
+            // Handle the 4 new point types
+            if (this.modeIs("fire")) {
+                this.createSpecialPoint(e.latlng, "Fire", "b-r-f-h-c", "Fire Location", "#ff8c00");
+                return;
+            }
+            if (this.modeIs("water")) {
+                this.createSpecialPoint(e.latlng, "Water", "b-m-p-w", "Water Source", "#0066cc");
+                return;
+            }
+            if (this.modeIs("observation")) {
+                this.createSpecialPoint(e.latlng, "Observation", "b-m-p-s-p-op", "Observation Point", "#ffff00");
+                return;
+            }
+            if (this.modeIs("hazard")) {
+                this.createSpecialPoint(e.latlng, "Hazard", "b-r-f-h-c", "Hazard", "#ff0000");
+                return;
+            }
+
+            // Original handlers
             if (this.modeIs("redx")) {
                 this.addOrMove("redx", e.latlng, "/static/icons/x.png")
                 return;
@@ -362,6 +383,162 @@ const app = Vue.createApp({
                     body: JSON.stringify({lat: e.latlng.lat, lon: e.latlng.lng})
                 };
                 fetch("/api/pos", requestOptions);
+            }
+        },
+
+        // Helper method to create the 4 special point types
+        createSpecialPoint: function(latlng, name, type, text, color) {
+            let uid = uuidv4();
+            let now = new Date();
+            let stale = new Date(now);
+            stale.setDate(stale.getDate() + 365);
+
+            let u = {
+                uid: uid,
+                category: "point",
+                callsign: name + "-" + this.point_num++,
+                sidc: "",
+                start_time: now,
+                last_seen: now,
+                stale_time: stale,
+                type: type,
+                lat: latlng.lat,
+                lon: latlng.lng,
+                hae: 0,
+                speed: 0,
+                course: 0,
+                status: "",
+                text: text,
+                parent_uid: "",
+                parent_callsign: "",
+                color: color,
+                send: true,
+                local: true,
+            }
+
+            if (this.config && this.config.uid) {
+                u.parent_uid = this.config.uid;
+                u.parent_callsign = this.config.callsign;
+            }
+
+            let unit = new Unit(this, u);
+            this.units.set(unit.uid, unit);
+            unit.post();
+
+            this.setCurrentUnitUid(u.uid, true);
+        },
+
+        // Toggle multi-select mode
+        toggleMultiSelect: function() {
+            this.multiSelectMode = !this.multiSelectMode;
+            if (!this.multiSelectMode) {
+                // Clear selections when exiting multi-select
+                this.selectedUnits.clear();
+                this.redrawAllMarkers();
+            } else {
+                // When entering multi-select mode, automatically switch to select tool
+                const selectRadio = document.getElementById('select');
+                if (selectRadio) {
+                    selectRadio.checked = true;
+                }
+            }
+        },
+        
+        toggleUnitSelection: function(uid) {
+            if (this.selectedUnits.has(uid)) {
+                this.selectedUnits.delete(uid);
+            } else {
+                this.selectedUnits.add(uid);
+            }
+            // Update visual indicator
+            let unit = this.units.get(uid);
+            if (unit) {
+                unit.updateMarker();
+            }
+        },
+        
+        deleteSelectedUnits: function() {
+            if (this.selectedUnits.size === 0) return;
+            
+            if (confirm(`Delete ${this.selectedUnits.size} selected items?`)) {
+                let deletePromises = [];
+                this.selectedUnits.forEach(uid => {
+                    deletePromises.push(
+                        fetch("/api/unit/" + uid, { method: "DELETE" })
+                    );
+                });
+                
+                Promise.all(deletePromises).then(() => {
+                    this.selectedUnits.clear();
+                    this.multiSelectMode = false;
+                    this.fetchAllUnits();
+                });
+            }
+        },
+        
+        redrawAllMarkers: function() {
+            this.units.forEach(unit => {
+                unit.updateMarker();
+            });
+        },
+
+        clearAllPoints: function() {
+            // Get all units that are points (any category that's not contact or unit)
+            const pointUnits = Array.from(this.units.values())
+                .filter(u => u.unit.category === 'point') // This includes fires, hazards, water points, observation points, etc.
+                .map(u => u.uid);
+            
+            if (pointUnits.length === 0) {
+                alert('No points to clear');
+                return;
+            }
+            
+            if (confirm(`Are you sure you want to clear all ${pointUnits.length} points? This includes fires, hazards, water sources, observation points, and all other map points.`)) {
+                console.log('Clearing all points:', pointUnits);
+                
+                // Delete each point with better error handling
+                let deletePromises = pointUnits.map(uid => {
+                    console.log('Deleting point:', uid);
+                    return fetch("/api/unit/" + uid, { method: "DELETE" })
+                        .then(response => {
+                            if (!response.ok) {
+                                console.error(`Failed to delete point ${uid}:`, response.status);
+                                return false;
+                            }
+                            return true;
+                        })
+                        .catch(error => {
+                            console.error(`Error deleting point ${uid}:`, error);
+                            return false;
+                        });
+                });
+                
+                Promise.all(deletePromises)
+                    .then(results => {
+                        const successful = results.filter(r => r === true).length;
+                        const failed = results.filter(r => r === false).length;
+                        
+                        console.log(`Deleted ${successful} points, ${failed} failed`);
+                        
+                        // Clear from local state immediately
+                        pointUnits.forEach(uid => {
+                            this.removeUnit(uid);
+                        });
+                        
+                        // Refresh from server
+                        this.fetchAllUnits();
+                        
+                        if (failed > 0) {
+                            alert(`${successful} points cleared, ${failed} failed. Check console for details.`);
+                        } else {
+                            alert(`${successful} points cleared successfully`);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error clearing points:', error);
+                        alert('Error clearing points. Check console for details.');
+                        this.fetchAllUnits();
+                    });
             }
         },
 
@@ -676,7 +853,6 @@ const app = Vue.createApp({
             fetch("/api/message", requestOptions)
                 .then(resp => resp.json())
                 .then(d => vm.messages = d);
-
         }
     },
 });
@@ -754,13 +930,19 @@ class Unit {
             if (this.redraw) {
                 this.marker.setIcon(getIcon(this.unit, true));
             }
+            // Add visual indicator for selected state
+            this.marker.setOpacity(this.app.selectedUnits.has(this.uid) ? 0.5 : 1.0);
         } else {
             this.marker = L.marker(this.coords(), {draggable: this.unit.local ? 'true' : 'false'});
             this.marker.setIcon(getIcon(this.unit, true));
 
             let vm = this;
             this.marker.on('click', function (e) {
-                vm.app.setCurrentUnitUid(vm.uid, false);
+                if (vm.app.multiSelectMode) {
+                    vm.app.toggleUnitSelection(vm.uid);
+                } else {
+                    vm.app.setCurrentUnitUid(vm.uid, false);
+                }
             });
 
             if (this.unit.local) {
