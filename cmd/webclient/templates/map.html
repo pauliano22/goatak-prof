@@ -8,6 +8,97 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <link href="styles.css" rel="stylesheet">
+    
+    <!-- Additional styles for camera streaming -->
+    <style>
+        .video-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .video-container {
+            position: relative;
+            max-width: 90%;
+            max-height: 90%;
+            background: black;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            max-width: 1200px;
+            max-height: 800px;
+            display: block;
+        }
+        
+        .video-controls {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            z-index: 10001;
+        }
+        
+        .video-title {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            color: white;
+            font-weight: 600;
+            font-size: 1.1rem;
+            z-index: 10001;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+        
+        .video-info {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            right: 15px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.85rem;
+            z-index: 10001;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+        }
+        
+        .rtsp-info {
+            text-align: center;
+            color: white;
+            padding: 2rem;
+            max-width: 600px;
+        }
+        
+        .rtsp-info h4 {
+            color: #ffc107;
+            margin-bottom: 1rem;
+        }
+        
+        .video-overlay .btn {
+            backdrop-filter: blur(5px);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+        
+        .video-overlay .btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+        
+        .video-overlay .btn-close-white {
+            filter: invert(1);
+        }
+    </style>
 </head>
 
 <body>
@@ -143,6 +234,10 @@
                                 <input type="radio" class="btn-check" name="btnradio" id="hazard" autocomplete="off">
                                 <label class="tool-btn" for="hazard">Hazard</label>
 
+                                <!-- NEW: Camera tool -->
+                                <input type="radio" class="btn-check" name="btnradio" id="camera" autocomplete="off">
+                                <label class="tool-btn" for="camera">Camera</label>
+
                                 <input type="radio" class="btn-check" name="btnradio" id="me" autocomplete="off"
                                     v-if="config && config.callsign">
                                 <label class="tool-btn" for="me" v-if="config && config.callsign">Me</label>
@@ -214,6 +309,14 @@
                                         class="bi bi-chat-text-fill"></i></button>
                             </div>
                             <div v-else>
+                                <!-- NEW: Camera stream button for camera points -->
+                                <button v-if="current_unit.unit.isCamera || current_unit.unit.type === 'b-m-p-s-p-v'" 
+                                        class="btn btn-sm btn-outline-info ms-1 fw-regular"
+                                        @click="showCameraStream(current_unit)"
+                                        title="View Camera Stream">
+                                    <i class="bi bi-camera-video"></i>
+                                </button>
+                                
                                 <button class="btn btn-sm btn-outline-primary ms-1 fw-regular" data-bs-toggle="modal"
                                     data-bs-target="#edit">
                                     <i class="bi bi-pencil-square"></i>
@@ -234,6 +337,13 @@
                                 <b class="fw-medium">Type:</b> {{ current_unit.unit.type }} <b
                                     class="fw-medium">SIDC:</b> {{ current_unit.unit.sidc }}
                             </div>
+                            
+                            <!-- NEW: Show stream info for camera points -->
+                            <div v-if="current_unit.unit.isCamera || current_unit.unit.type === 'b-m-p-s-p-v'">
+                                <b class="fw-medium">Stream:</b> <span class="fw-light">{{ current_unit.unit.streamUrl || 'Not configured' }}</span><br />
+                                <b class="fw-medium">Type:</b> <span class="fw-light badge bg-info">{{ current_unit.unit.streamType || 'unknown' }}</span>
+                            </div>
+                            
                             <div>
                                 <b class="fw-medium">coords:</b> {{ printCoords(current_unit.unit.lat,
                                 current_unit.unit.lon) }}
@@ -265,6 +375,66 @@
                             </div>
                             <span class="fw-light">{{ current_unit.unit.text }}</span>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: Video Overlay -->
+        <div v-if="currentVideo && currentVideo.visible" class="video-overlay" @click.self="stopVideo()">
+            <div class="video-container">
+                <div class="video-title">{{ currentVideo.title || 'Camera Stream' }}</div>
+                <div class="video-controls">
+                    <button class="btn btn-sm btn-danger fw-medium" @click="stopVideo()">
+                        <i class="bi bi-x-circle"></i> Close
+                    </button>
+                </div>
+                
+                <!-- Regular Video -->
+                <video v-if="!currentVideo.isWebcam && !currentVideo.isRTSP" 
+                       :src="currentVideo.url" 
+                       controls 
+                       autoplay 
+                       muted>
+                    Your browser does not support video playback.
+                </video>
+                
+                <!-- Webcam Video -->
+                <video v-if="currentVideo.isWebcam" 
+                       ref="webcamVideo"
+                       autoplay 
+                       muted
+                       playsinline>
+                    Your browser does not support video playback.
+                </video>
+                
+                <!-- RTSP Info Display -->
+                <div v-if="currentVideo.isRTSP" class="rtsp-info">
+                    <h4><i class="bi bi-camera-video"></i> RTSP Stream</h4>
+                    <p><strong>URL:</strong> {{ currentVideo.url }}</p>
+                    <div class="alert alert-warning">
+                        <p><strong>Note:</strong> RTSP streams cannot be played directly in web browsers.</p>
+                        <p><strong>Solutions:</strong></p>
+                        <ul class="text-start">
+                            <li>Use MediaMTX to convert RTSP to WebRTC/HLS</li>
+                            <li>Use VLC Web Plugin (deprecated)</li>
+                            <li>Set up a streaming server for browser compatibility</li>
+                        </ul>
+                    </div>
+                    <button class="btn btn-outline-light fw-medium" @click="copyToClipboard(currentVideo.url)">
+                        <i class="bi bi-clipboard"></i> Copy RTSP URL
+                    </button>
+                </div>
+                
+                <div class="video-info" v-if="!currentVideo.isRTSP">
+                    <div v-if="currentVideo.isWebcam" class="text-center">
+                        <i class="bi bi-camera-video"></i> Live webcam feed
+                    </div>
+                    <div v-else-if="currentVideo.isLive" class="text-center">
+                        <i class="bi bi-broadcast"></i> Live stream: {{ currentVideo.url }}
+                    </div>
+                    <div v-else class="text-center">
+                        <i class="bi bi-play-circle"></i> Video: {{ currentVideo.url }}
                     </div>
                 </div>
             </div>
@@ -350,6 +520,7 @@
                                         <option value="b-m-p-a">Aim</option>
                                         <option value="b-r-f-h-c">Fire/Hazard</option>
                                         <option value="b-m-p-w">Water Source</option>
+                                        <option value="b-m-p-s-p-v">Camera Feed</option>
                                     </select>
                                 </div>
                             </div>
@@ -388,6 +559,20 @@
                                     </div>
                                 </div>
                             </div>
+                            
+                            <!-- NEW: Camera stream URL field for camera points -->
+                            <div class="row m-2" v-if="form_unit.type === 'b-m-p-s-p-v'">
+                                <div class="col-12">
+                                    <label for="ed-stream-url" class="form-label fw-medium">Stream URL</label>
+                                    <input type="text" class="form-control fw-regular" id="ed-stream-url" 
+                                           v-model="form_unit.streamUrl" 
+                                           placeholder="rtsp://example.com/stream or http://example.com/stream.m3u8">
+                                    <div class="form-text">
+                                        Supported: RTSP, HLS (.m3u8), WebRTC, regular video URLs, or 'webcam://live-stream' for local camera
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <div class="row m-2">
                                 <div class="col-12">
                                     <label for="ed-remarks" class="fw-medium">Remarks</label>
@@ -412,7 +597,56 @@
         </div>
     </div>
 
+    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Leaflet -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    
+    <!-- Vue.js -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <!-- HLS.js for HLS stream support -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    
+    <!-- UUID generator -->
+    <script>
+        function uuidv4() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        
+        // Mock icon functions (replace with your actual implementations)
+        function getIcon(unit, param) {
+            const iconMap = {
+                'b-m-p-s-p-v': '/static/icons/camera.png',
+                'b-r-f-h-c': '/static/icons/fire.png',
+                'b-m-p-w': '/static/icons/water.png',
+                'b-m-p-s-p-op': '/static/icons/observation.png'
+            };
+            
+            return L.icon({
+                iconUrl: iconMap[unit.type] || '/static/icons/default.png',
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+        }
+        
+        function getIconUri(item, size, param) {
+            return { uri: '/static/icons/default.png' };
+        }
+        
+        function getMilIconUri(item, size, param) {
+            return { uri: '/static/icons/default.png' };
+        }
+    </script>
+    
+    <!-- Your enhanced JavaScript code goes here -->
+    <script>
+        // Insert your enhanced JavaScript from the previous artifact here
+    </script>
 </body>
 
 </html>

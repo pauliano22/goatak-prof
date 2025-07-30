@@ -25,6 +25,11 @@ const app = Vue.createApp({
             chat_msg: "",
             multiSelectMode: false,
             selectedUnits: new Set(),
+            // Camera streaming additions
+            currentVideo: null,
+            webcamStream: null,
+            webrtcPeerConnection: null,
+            hlsInstance: null,
         }
     },
 
@@ -50,6 +55,11 @@ const app = Vue.createApp({
         map.on('mousemove', this.mouseMove);
 
         this.formFromUnit(null);
+
+        // Cleanup webcam when page unloads
+        window.addEventListener('beforeunload', () => {
+            this.destroyWebcamStream();
+        });
     },
 
     computed: {
@@ -308,6 +318,12 @@ const app = Vue.createApp({
         },
 
         mapClick: function (e) {
+            // Handle camera tool
+            if (this.modeIs("camera")) {
+                this.addCameraPoint(e.latlng);
+                return;
+            }
+
             // Handle the 4 new point types
             if (this.modeIs("fire")) {
                 this.createSpecialPoint(e.latlng, "Fire", "b-r-f-h-c", "Fire Location", "#ff8c00");
@@ -383,6 +399,292 @@ const app = Vue.createApp({
                     body: JSON.stringify({lat: e.latlng.lat, lon: e.latlng.lng})
                 };
                 fetch("/api/pos", requestOptions);
+            }
+        },
+
+        // NEW CAMERA METHODS
+        async addCameraPoint(latlng) {
+            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "rtsp://example.com/stream");
+            if (!streamUrl) {
+                return; // User cancelled
+            }
+
+            let uid = uuidv4();
+            let now = new Date();
+            let stale = new Date(now);
+            stale.setDate(stale.getDate() + 365);
+
+            // Detect stream type based on URL
+            const streamType = this.detectStreamType(streamUrl);
+            const streamName = "Camera";
+
+            let u = {
+                uid: uid,
+                category: "point",
+                callsign: streamName + "-" + this.point_num++,
+                sidc: "",
+                start_time: now,
+                last_seen: now,
+                stale_time: stale,
+                type: "b-m-p-s-p-v", // CoT Camera Feed type
+                lat: latlng.lat,
+                lon: latlng.lng,
+                hae: 0,
+                speed: 0,
+                course: 0,
+                status: "",
+                text: "Camera feed: " + streamUrl,
+                parent_uid: "",
+                parent_callsign: "",
+                color: "#0066cc",
+                send: true,
+                local: true,
+                isCamera: true,
+                streamUrl: streamUrl,
+                streamType: streamType
+            }
+
+            if (this.config && this.config.uid) {
+                u.parent_uid = this.config.uid;
+                u.parent_callsign = this.config.callsign;
+            }
+
+            let unit = new Unit(this, u);
+            this.units.set(unit.uid, unit);
+            unit.post();
+
+            this.setCurrentUnitUid(u.uid, true);
+        },
+
+        detectStreamType(streamUrl) {
+            if (streamUrl.toLowerCase().startsWith('rtsp://')) return 'rtsp';
+            if (streamUrl.includes('.m3u8')) return 'hls';
+            if (streamUrl.includes(':9001/')) return 'webrtc';
+            if (streamUrl === 'webcam://live-stream') return 'webcam';
+            return 'video';
+        },
+
+        showCameraStream(unit) {
+            if (!unit.unit.isCamera && unit.unit.type !== "b-m-p-s-p-v") {
+                console.log('Not a camera unit:', unit.unit);
+                return;
+            }
+
+            console.log('Opening camera stream for:', unit.unit.callsign);
+            console.log('Stream URL:', unit.unit.streamUrl);
+            console.log('Stream Type:', unit.unit.streamType);
+
+            const streamUrl = unit.unit.streamUrl;
+            const streamType = unit.unit.streamType || this.detectStreamType(streamUrl);
+
+            if (!streamUrl) {
+                console.error('No stream URL found for camera unit');
+                alert('No stream URL configured for this camera');
+                return;
+            }
+
+            // Set up currentVideo
+            this.currentVideo = {
+                url: streamUrl,
+                visible: true,
+                isLive: streamType === 'webrtc' || streamType === 'hls' || streamType === 'rtsp',
+                isWebcam: streamType === 'webcam',
+                isWebRTC: streamType === 'webrtc',
+                isHLS: streamType === 'hls',
+                isRTSP: streamType === 'rtsp',
+                title: unit.unit.callsign
+            };
+
+            // Handle different stream types
+            if (streamType === 'rtsp') {
+                this.handleRTSPStream(unit, streamUrl);
+            } else if (streamType === 'webcam') {
+                this.handleWebcamStream(unit);
+            } else if (streamType === 'webrtc') {
+                this.handleWebRTCStream(unit, streamUrl);
+            } else if (streamType === 'hls') {
+                this.handleHLSStream(unit, streamUrl);
+            } else {
+                this.handleRegularVideo(unit, streamUrl);
+            }
+        },
+
+        handleRTSPStream(unit, streamUrl) {
+            console.log('RTSP stream detected');
+            alert(`RTSP Stream: ${streamUrl}\n\nNote: RTSP streams cannot be played directly in browsers. Consider using:\n- MediaMTX to convert to WebRTC/HLS\n- VLC Web Plugin\n- A streaming server that converts RTSP to browser-compatible formats`);
+            
+            // You could implement WebRTC conversion here or redirect to an external player
+            // For now, we'll just display the RTSP URL
+            this.currentVideo.isRTSP = true;
+        },
+
+        async handleWebcamStream(unit) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 1280, height: 720 }, 
+                    audio: false 
+                });
+                
+                this.webcamStream = stream;
+                this.currentVideo.stream = stream;
+                
+                // Wait for DOM update
+                await this.$nextTick();
+                
+                const videoElement = document.querySelector('.video-overlay video');
+                if (videoElement) {
+                    videoElement.srcObject = stream;
+                    videoElement.play().catch(console.error);
+                }
+            } catch (error) {
+                console.error('Error accessing webcam:', error);
+                alert('Could not access webcam: ' + error.message);
+            }
+        },
+
+        async handleWebRTCStream(unit, streamUrl) {
+            console.log('Handling WebRTC stream');
+            await this.$nextTick();
+            
+            try {
+                await this.setupWebRTCPlayer(streamUrl);
+            } catch (error) {
+                console.error('WebRTC setup failed:', error);
+                alert('WebRTC connection failed: ' + error.message);
+            }
+        },
+
+        async setupWebRTCPlayer(streamUrl) {
+            const videoElement = document.querySelector('.video-overlay video');
+            if (!videoElement) {
+                throw new Error('Video element not found');
+            }
+
+            // Clean up existing connection
+            if (this.webrtcPeerConnection) {
+                this.webrtcPeerConnection.close();
+            }
+
+            this.webrtcPeerConnection = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            this.webrtcPeerConnection.ontrack = (event) => {
+                console.log('Received WebRTC track');
+                videoElement.srcObject = event.streams[0];
+                videoElement.play().catch(console.error);
+            };
+
+            const offer = await this.webrtcPeerConnection.createOffer();
+            await this.webrtcPeerConnection.setLocalDescription(offer);
+
+            // Try WebRTC connection
+            const response = await fetch(streamUrl + '/whep', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/sdp' },
+                body: offer.sdp
+            });
+
+            if (response.ok) {
+                const answerSdp = await response.text();
+                await this.webrtcPeerConnection.setRemoteDescription({
+                    type: 'answer',
+                    sdp: answerSdp
+                });
+            } else {
+                throw new Error(`WebRTC connection failed: ${response.status}`);
+            }
+        },
+
+        async handleHLSStream(unit, streamUrl) {
+            console.log('Handling HLS stream');
+            await this.$nextTick();
+            await new Promise(resolve => setTimeout(resolve, 100));
+            this.setupHLSPlayback(streamUrl);
+        },
+
+        setupHLSPlayback(streamUrl) {
+            const videoElement = document.querySelector('.video-overlay video');
+            if (!videoElement) {
+                console.error('Video element not found');
+                return;
+            }
+
+            // Check if HLS.js is available
+            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                if (this.hlsInstance) {
+                    this.hlsInstance.destroy();
+                }
+
+                this.hlsInstance = new Hls({
+                    debug: false,
+                    lowLatencyMode: true
+                });
+
+                this.hlsInstance.loadSource(streamUrl);
+                this.hlsInstance.attachMedia(videoElement);
+
+                this.hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    videoElement.play().catch(console.error);
+                });
+
+                this.hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                    console.error('HLS error:', data);
+                    if (data.fatal) {
+                        alert('HLS playback error: ' + data.details);
+                    }
+                });
+            } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari native HLS
+                videoElement.src = streamUrl;
+                videoElement.play().catch(console.error);
+            } else {
+                alert('HLS playback not supported. Please include HLS.js library.');
+            }
+        },
+
+        async handleRegularVideo(unit, streamUrl) {
+            console.log('Handling regular video');
+            await this.$nextTick();
+        },
+
+        stopVideo() {
+            console.log('Stopping video playback');
+
+            // Clean up WebRTC
+            if (this.webrtcPeerConnection) {
+                this.webrtcPeerConnection.close();
+                this.webrtcPeerConnection = null;
+            }
+
+            // Clean up HLS
+            if (this.hlsInstance) {
+                this.hlsInstance.destroy();
+                this.hlsInstance = null;
+            }
+
+            // Clean up webcam
+            this.destroyWebcamStream();
+
+            // Clean up video element
+            const videoElement = document.querySelector('.video-overlay video');
+            if (videoElement) {
+                videoElement.pause();
+                videoElement.src = '';
+                videoElement.srcObject = null;
+                videoElement.load();
+            }
+
+            // Hide video modal
+            if (this.currentVideo) {
+                this.currentVideo.visible = false;
+            }
+        },
+
+        destroyWebcamStream() {
+            if (this.webcamStream) {
+                this.webcamStream.getTracks().forEach(track => track.stop());
+                this.webcamStream = null;
             }
         },
 
@@ -855,6 +1157,16 @@ const app = Vue.createApp({
                 .then(d => vm.messages = d);
         }
     },
+
+    beforeUnmount() {
+        if (this.webrtcPeerConnection) {
+            this.webrtcPeerConnection.close();
+        }
+        if (this.hlsInstance) {
+            this.hlsInstance.destroy();
+        }
+        this.destroyWebcamStream();
+    }
 });
 
 app.mount('#app');
@@ -941,7 +1253,12 @@ class Unit {
                 if (vm.app.multiSelectMode) {
                     vm.app.toggleUnitSelection(vm.uid);
                 } else {
-                    vm.app.setCurrentUnitUid(vm.uid, false);
+                    // Check if this is a camera unit
+                    if (vm.unit.isCamera || vm.unit.type === "b-m-p-s-p-v") {
+                        vm.app.showCameraStream(vm);
+                    } else {
+                        vm.app.setCurrentUnitUid(vm.uid, false);
+                    }
                 }
             });
 
