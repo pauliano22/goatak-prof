@@ -1,20 +1,636 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto&display=swap');
+/* GoATAK Client - IBM Brand Guidelines CSS */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
+/* IBM Brand Guidelines Implementation */
+:root {
+    --vibrant-red: #FF000A;
+    --stealth: #172430;
+    --titanium: #283030;
+    --white: #FFFFFF;
+    --medium-gray: #737373;
+    --data-blue: #A4E3E4;
+    --light-gray: #EDEDED;
+}
+
+/* Hide radio button inputs */
+.btn-check {
+    display: none !important;
+}
+
+/* Stealth Card Styling */
+.stealth-card {
+    background-color: var(--stealth);
+    border: 1px solid var(--titanium);
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.stealth-card .card-header {
+    background-color: var(--stealth);
+    border-bottom: 1px solid var(--titanium);
+    color: var(--white);
+    font-weight: 600;
+    border-radius: 12px 12px 0 0 !important;
+}
+
+.stealth-card .card-body {
+    background-color: var(--stealth);
+    color: var(--white);
+    border-radius: 0 0 12px 12px !important;
+}
+
+/* Flexbox Tools Container */
+.tools-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+/* Tool Buttons - Titanium with Data-Blue Hover */
+.tool-btn {
+    background-color: var(--titanium);
+    color: var(--white);
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    display: inline-block;
+    min-width: 60px;
+    text-align: center;
+}
+
+.tool-btn:hover {
+    background-color: var(--data-blue);
+    color: var(--stealth);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(164, 227, 228, 0.3);
+}
+
+.tool-btn:active {
+    transform: translateY(0);
+}
+
+.btn-check:checked + .tool-btn {
+    background-color: var(--data-blue);
+    color: var(--stealth);
+    box-shadow: 0 2px 8px rgba(164, 227, 228, 0.4);
+}
+
+/* Control Buttons */
+.control-btn {
+    background-color: var(--titanium);
+    color: var(--white);
+    border: 1px solid var(--titanium);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.control-btn:hover {
+    background-color: var(--data-blue);
+    border-color: var(--data-blue);
+    color: var(--stealth);
+    transform: translateY(-1px);
+}
+
+.control-btn.active {
+    background-color: var(--data-blue);
+    border-color: var(--data-blue);
+    color: var(--stealth);
+}
+
+.control-btn.btn-warning {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    color: var(--white);
+}
+
+.control-btn.btn-warning:hover {
+    background-color: #e6000a;
+    border-color: #e6000a;
+}
+
+.control-btn.btn-danger {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    color: var(--white);
+}
+
+.control-btn.btn-danger:hover {
+    background-color: #e6000a;
+    border-color: #e6000a;
+}
+
+/* Badge Styling for Stealth Cards */
+.stealth-card .badge {
+    background-color: var(--data-blue) !important;
+    color: var(--stealth);
+    border-radius: 6px;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+.stealth-card .badge.bg-danger {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white);
+}
+
+.stealth-card .badge.bg-success {
+    background-color: var(--data-blue) !important;
+    color: var(--stealth);
+}
+
+.stealth-card .badge.bg-info {
+    background-color: var(--data-blue) !important;
+    color: var(--stealth);
+}
+
+.stealth-card .badge.bg-secondary {
+    background-color: var(--titanium) !important;
+    color: var(--white);
+}
+
+/* Status Items */
+.status-item {
+    margin-top: 8px;
+    padding: 8px;
+    background-color: rgba(40, 48, 48, 0.3);
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.badge.rounded-pill {
+    cursor: pointer;
+    margin-left: 4px;
+    transition: all 0.2s ease;
+}
+
+.badge.rounded-pill:hover {
+    transform: scale(1.1);
+}
+
+/* Multi-Select Info */
+.multi-select-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding: 6px 8px;
+    background-color: rgba(164, 227, 228, 0.1);
+    border-radius: 6px;
+    border: 1px solid var(--data-blue);
+}
+
+.btn-sm {
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 6px;
+}
+
+/* Text Colors for Stealth Cards */
+.stealth-card .fw-light {
+    color: var(--medium-gray) !important;
+}
+
+.stealth-card .fw-medium {
+    color: var(--white) !important;
+    font-weight: 600 !important;
+}
+
+.stealth-card .fw-regular {
+    font-weight: 500 !important;
+    color: var(--white) !important;
+}
+
+/* Typography - IBM Plex Sans */
+body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 400; /* Regular for body text */
+    background-color: var(--light-gray);
+    color: var(--white);
+}
+
+/* Font weights for different elements - All IBM Plex Sans */
+.fw-light { 
+    font-weight: 300; 
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+.fw-regular { 
+    font-weight: 400; 
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+.fw-medium { 
+    font-weight: 500; 
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+.fw-semibold { 
+    font-weight: 600; 
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* Hide leaflet attribution */
 .leaflet-control-attribution {
     display: none;
 }
 
+/* Table styling */
 table.table-xs {
     font-size: 10pt;
+    font-weight: 300; /* Light for less distracting text */
 }
 
+/* Info div styling */
 div.info {
-    font-family: 'Roboto', sans-serif;
+    font-family: 'IBM Plex Sans', sans-serif;
     font-size: 11pt;
+    font-weight: 300; /* Light for less distracting text */
 }
 
 .text-center {
     height: 100%;
     line-height: 100%;
     text-align: center;
+}
+
+/* Navbar - Clean stealth with no white backgrounds */
+.navbar-dark {
+    background-color: var(--stealth) !important;
+    border-bottom: 2px solid var(--vibrant-red);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.navbar-brand {
+    font-weight: 600; /* SemiBold for brand */
+    color: var(--white) !important;
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.navbar-nav .nav-link {
+    color: var(--white) !important;
+    font-weight: 400; /* Regular */
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.navbar-nav .nav-link:hover {
+    color: var(--vibrant-red) !important;
+}
+
+/* All navbar badges - no white backgrounds */
+.navbar .badge {
+    background-color: var(--titanium) !important;
+    color: var(--white) !important;
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.navbar .badge.bg-success, 
+.navbar .badge.text-bg-success {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.navbar .badge.text-bg-warning {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.navbar .badge.text-bg-danger {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.navbar .badge.text-bg-secondary {
+    background-color: var(--titanium) !important;
+    color: var(--white) !important;
+}
+
+/* Badges - All consistent with IBM Plex Sans */
+.badge {
+    font-weight: 500;
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.badge.bg-success, .badge.text-bg-success {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.badge.text-bg-warning {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.badge.text-bg-secondary {
+    background-color: var(--titanium) !important;
+    color: var(--white) !important;
+}
+
+.badge.text-bg-info {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.badge.text-bg-danger, .badge.bg-danger {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.badge.bg-info {
+    background-color: var(--vibrant-red) !important;
+    color: var(--white) !important;
+}
+
+.badge.bg-secondary {
+    background-color: var(--titanium) !important;
+    color: var(--white) !important;
+}
+
+/* Form controls - IBM Plex Sans */
+.form-control {
+    border: 1px solid var(--medium-gray);
+    color: var(--stealth);
+    background-color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.form-control:focus {
+    border-color: var(--vibrant-red);
+    box-shadow: 0 0 0 0.2rem rgba(164, 227, 228, 0.25);
+}
+
+.form-select {
+    border: 1px solid var(--medium-gray);
+    color: var(--stealth);
+    background-color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.form-select:focus {
+    border-color: var(--vibrant-red);
+    box-shadow: 0 0 0 0.2rem rgba(164, 227, 228, 0.25);
+}
+
+/* Form check inputs */
+.form-check-input {
+    border: 1px solid var(--medium-gray);
+}
+
+.form-check-input:checked {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+}
+
+.form-check-input:focus {
+    box-shadow: 0 0 0 0.2rem rgba(164, 227, 228, 0.25);
+}
+
+/* Cards - All stealth background */
+.card {
+    background-color: var(--stealth);
+    border: 1px solid var(--titanium);
+    box-shadow: 0 2px 8px rgba(23, 36, 48, 0.3);
+    border-radius: 12px;
+}
+
+.card-header {
+    background-color: var(--stealth);
+    color: var(--white);
+    font-weight: 500; /* Medium for subheads */
+    border-bottom: 1px solid var(--titanium);
+    border-radius: 12px 12px 0 0 !important;
+}
+
+.card-body {
+    font-weight: 400; /* Regular for body text */
+    background-color: var(--stealth);
+    color: var(--white);
+}
+
+/* Text colors for ALL cards */
+.card .fw-light {
+    color: var(--medium-gray) !important;
+}
+
+.card .fw-medium {
+    color: var(--white) !important;
+    font-weight: 600 !important;
+}
+
+.card .fw-regular {
+    font-weight: 500 !important;
+    color: var(--white) !important;
+}
+
+.card b {
+    color: var(--white) !important;
+}
+
+/* Buttons - All IBM Plex Sans font family */
+.btn {
+    font-weight: 500;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.btn-primary {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    color: var(--white);
+    font-weight: 500;
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.btn-primary:hover {
+    background-color: #8DDCE0;
+    border-color: #8DDCE0;
+    color: var(--stealth);
+}
+
+.btn-outline-primary {
+    color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    background-color: transparent;
+    font-weight: 400;
+}
+
+.btn-outline-primary:hover {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    color: var(--white);
+}
+
+.btn-secondary {
+    background-color: var(--medium-gray);
+    border-color: var(--medium-gray);
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.btn-secondary:hover {
+    background-color: var(--titanium);
+    border-color: var(--titanium);
+    color: var(--white);
+}
+
+.btn-outline-secondary {
+    color: var(--medium-gray);
+    border-color: var(--medium-gray);
+    background-color: transparent;
+}
+
+.btn-outline-secondary:hover {
+    background-color: var(--medium-gray);
+    border-color: var(--medium-gray);
+    color: var(--white);
+}
+
+.btn-danger {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.btn-danger:hover {
+    background-color: #E6000A;
+    border-color: #E6000A;
+    color: var(--white);
+}
+
+.btn-outline-danger {
+    color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    background-color: transparent;
+}
+
+.btn-outline-danger:hover {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    color: var(--white);
+}
+
+.btn-warning {
+    background-color: var(--titanium);
+    border-color: var(--titanium);
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.btn-warning:hover {
+    background-color: var(--stealth);
+    border-color: var(--stealth);
+    color: var(--white);
+}
+
+/* Button groups for tools */
+.btn-group .btn-outline-primary.active,
+.btn-group .btn-check:checked + .btn-outline-primary {
+    background-color: var(--vibrant-red);
+    border-color: var(--vibrant-red);
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* Dropdown menus */
+.dropdown-menu-dark {
+    background-color: var(--stealth);
+    border: 1px solid var(--titanium);
+}
+
+.dropdown-menu-dark .dropdown-item {
+    color: var(--white);
+    font-weight: 400; /* Regular */
+}
+
+.dropdown-menu-dark .dropdown-item:hover {
+    background-color: var(--titanium);
+    color: var(--vibrant-red);
+}
+
+/* Modal styling */
+.modal-content {
+    background-color: var(--white);
+    border: 1px solid var(--medium-gray);
+}
+
+.modal-header {
+    background-color: var(--titanium);
+    color: var(--white);
+    border-bottom: 1px solid var(--medium-gray);
+}
+
+.modal-title {
+    font-weight: 600; /* SemiBold for titles */
+}
+
+.modal-body {
+    background-color: var(--white);
+    color: var(--stealth);
+}
+
+.modal-footer {
+    background-color: var(--light-gray);
+    border-top: 1px solid var(--medium-gray);
+}
+
+/* Button close in modals */
+.btn-close {
+    filter: invert(1);
+}
+
+/* Form labels - IBM Plex Sans */
+.form-label, .col-form-label {
+    font-weight: 500; /* Medium for labels */
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* Alert styling */
+.alert-secondary {
+    background-color: var(--light-gray);
+    border-color: var(--medium-gray);
+    color: var(--stealth);
+}
+
+/* Map cursor */
+#map {
+    cursor: crosshair;
+}
+
+/* Typography hierarchy - All IBM Plex Sans */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600; /* SemiBold for headlines */
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.fs-5 {
+    font-weight: 500; /* Medium for larger text */
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* Status indicators */
+.badge.rounded-pill {
+    font-weight: 500; /* Medium for important info */
+}
+
+/* Custom styling for better visual hierarchy */
+.container-fluid {
+    background-color: var(--stealth);
+}
+
+/* Improve readability for less important text */
+small, .small {
+    font-weight: 300; /* Light for less distracting text */
+    color: var(--medium-gray);
 }
