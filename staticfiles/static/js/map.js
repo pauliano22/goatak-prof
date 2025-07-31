@@ -30,6 +30,12 @@ const app = Vue.createApp({
             webcamStream: null,
             webrtcPeerConnection: null,
             hlsInstance: null,
+            // File repository additions
+            currentFileRepository: null,
+            repositoryFiles: [],
+            selectedFiles: null,
+            uploadProgress: 0,
+            isUploading: false,
         }
     },
 
@@ -324,6 +330,12 @@ const app = Vue.createApp({
                 return;
             }
 
+            // Handle file repository tool
+            if (this.modeIs("files")) {
+                this.addFileRepositoryPoint(e.latlng);
+                return;
+            }
+
             // Handle the 4 new point types
             if (this.modeIs("fire")) {
                 this.createSpecialPoint(e.latlng, "Fire", "b-r-f-h-c", "Fire Location", "#ff8c00");
@@ -403,6 +415,363 @@ const app = Vue.createApp({
         },
 
         // NEW CAMERA METHODS
+        async addCameraPoint(latlng) {
+            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "rtsp://example.com/stream");
+            if (!streamUrl) {
+                return; // User cancelled
+            }
+
+            let uid = uuidv4();
+            let now = new Date();
+            let stale = new Date(now);
+            stale.setDate(stale.getDate() + 365);
+
+            // Detect stream type based on URL
+            const streamType = this.detectStreamType(streamUrl);
+            const streamName = "Camera";
+
+            let u = {
+                uid: uid,
+                category: "point",
+                callsign: streamName + "-" + this.point_num++,
+                sidc: "",
+                start_time: now,
+                last_seen: now,
+                stale_time: stale,
+                type: "b-m-p-s-p-v", // CoT Camera Feed type
+                lat: latlng.lat,
+                lon: latlng.lng,
+                hae: 0,
+                speed: 0,
+                course: 0,
+                status: "",
+                text: "Camera feed: " + streamUrl,
+                parent_uid: "",
+                parent_callsign: "",
+                color: "#0066cc",
+                send: true,
+                local: true,
+                isCamera: true,
+                streamUrl: streamUrl,
+                streamType: streamType
+            }
+
+            if (this.config && this.config.uid) {
+                u.parent_uid = this.config.uid;
+                u.parent_callsign = this.config.callsign;
+            }
+
+            let unit = new Unit(this, u);
+            this.units.set(unit.uid, unit);
+            unit.post();
+
+            this.setCurrentUnitUid(u.uid, true);
+        },
+
+        // NEW FILE REPOSITORY METHODS
+        async addFileRepositoryPoint(latlng) {
+            const repoName = prompt("Enter file repository name:", "Files");
+            if (!repoName) {
+                return; // User cancelled
+            }
+
+            let uid = uuidv4();
+            let now = new Date();
+            let stale = new Date(now);
+            stale.setDate(stale.getDate() + 365);
+
+            let u = {
+                uid: uid,
+                category: "point",
+                callsign: repoName + "-" + this.point_num++,
+                sidc: "",
+                start_time: now,
+                last_seen: now,
+                stale_time: stale,
+                type: "b-m-p-s-p-f", // CoT File Repository type
+                lat: latlng.lat,
+                lon: latlng.lng,
+                hae: 0,
+                speed: 0,
+                course: 0,
+                status: "",
+                text: "File repository: " + repoName,
+                parent_uid: "",
+                parent_callsign: "",
+                color: "#28a745",
+                send: true,
+                local: true,
+                isFileRepository: true,
+                repositoryName: repoName
+            }
+
+            if (this.config && this.config.uid) {
+                u.parent_uid = this.config.uid;
+                u.parent_callsign = this.config.callsign;
+            }
+
+            let unit = new Unit(this, u);
+            this.units.set(unit.uid, unit);
+            unit.post();
+
+            this.setCurrentUnitUid(u.uid, true);
+        },
+
+        async showFileRepository(unit) {
+            if (!unit.unit.isFileRepository && unit.unit.type !== "b-m-p-s-p-f") {
+                console.log('Not a file repository unit:', unit.unit);
+                return;
+            }
+
+            console.log('Opening file repository for:', unit.unit.callsign);
+
+            // Set current repository
+            this.currentFileRepository = {
+                unit: unit,
+                visible: true,
+                name: unit.unit.repositoryName || unit.unit.callsign,
+                uid: unit.uid
+            };
+
+            // Load files for this repository
+            await this.loadRepositoryFiles(unit.uid);
+        },
+
+        async loadRepositoryFiles(repositoryUid) {
+            try {
+                const response = await fetch('/Marti/sync/search');
+                if (!response.ok) {
+                    console.log('Cannot fetch from Marti API, status:', response.status);
+                    this.repositoryFiles = [];
+                    return;
+                }
+                
+                const data = await response.json();
+                const allFiles = data.results || [];
+                
+                // Filter files that belong to this repository
+                // We'll use a naming convention or metadata to associate files with repositories
+                this.repositoryFiles = allFiles.filter(file => {
+                    // Check if file name contains repository UID or use keywords
+                    return file.Keywords && file.Keywords.includes(repositoryUid) ||
+                           file.FileName && file.FileName.includes(repositoryUid);
+                });
+                
+                console.log('Found repository files:', this.repositoryFiles);
+            } catch (error) {
+                console.error('Failed to load repository files:', error);
+                this.repositoryFiles = [];
+            }
+        },
+
+        async uploadFilesToRepository() {
+            if (!this.selectedFiles || this.selectedFiles.length === 0) {
+                alert('Please select files to upload');
+                return;
+            }
+        
+            if (!this.currentFileRepository) {
+                alert('No repository selected');
+                return;
+            }
+        
+            this.isUploading = true;
+            const repositoryUid = this.currentFileRepository.uid;
+            const successfulUploads = [];
+            const failedUploads = [];
+        
+            for (let i = 0; i < this.selectedFiles.length; i++) {
+                const file = this.selectedFiles[i];
+                this.uploadProgress = Math.round(((i + 1) / this.selectedFiles.length) * 100);
+        
+                try {
+                    // Add repository UID to filename to associate with this repository
+                    const modifiedFileName = `${repositoryUid}_${file.name}`;
+                    
+                    const formData = new FormData();
+                    
+                    // Try different field names that the backend might expect
+                    // Most common field names for file uploads:
+                    // 1. 'file' - most common
+                    // 2. 'upload' - alternative
+                    // 3. The original filename - some backends expect this
+                    
+                    // Create a new file with the modified name
+                    const renamedFile = new File([file], modifiedFileName, { type: file.type });
+                    
+                    // Try 'file' as the field name (most common)
+                    formData.append('file', renamedFile);
+                    
+                    // Also try adding the file with its name as the field name
+                    // Some backends expect this format
+                    formData.append(modifiedFileName, renamedFile);
+                    
+                    // Add keywords to associate with repository
+                    formData.append('keywords', repositoryUid);
+                    
+                    // Some backends expect additional metadata
+                    formData.append('filename', modifiedFileName);
+                    formData.append('name', modifiedFileName);
+        
+                    // Try without the query parameter first
+                    let response = await fetch('/Marti/sync/upload', {
+                        method: 'POST',
+                        body: formData
+                        // Don't set Content-Type header - let browser set it with boundary
+                    });
+        
+                    // If that fails, try with the name parameter
+                    if (!response.ok && response.status === 406) {
+                        // Create new FormData for second attempt
+                        const formData2 = new FormData();
+                        formData2.append('file', renamedFile);
+                        
+                        response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
+                            method: 'POST',
+                            body: formData2
+                        });
+                    }
+        
+                    // If still failing, try raw file upload
+                    if (!response.ok && response.status === 406) {
+                        response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': file.type || 'application/octet-stream',
+                            },
+                            body: file // Send raw file data
+                        });
+                    }
+        
+                    if (response.ok) {
+                        const result = await response.text();
+                        console.log('File uploaded successfully:', result);
+                        successfulUploads.push(file.name);
+                    } else {
+                        const errorText = await response.text();
+                        console.error('Upload failed for:', file.name, response.status, errorText);
+                        failedUploads.push(file.name);
+                    }
+                } catch (error) {
+                    console.error('Upload error for:', file.name, error);
+                    failedUploads.push(file.name);
+                }
+            }
+        
+            this.isUploading = false;
+            this.uploadProgress = 0;
+            this.selectedFiles = null;
+        
+            // Show results
+            let message = `Upload complete!\nSuccessful: ${successfulUploads.length}`;
+            if (failedUploads.length > 0) {
+                message += `\nFailed: ${failedUploads.length}`;
+                if (failedUploads.length <= 5) {
+                    message += '\nFailed files: ' + failedUploads.join(', ');
+                }
+            }
+            alert(message);
+        
+            // Reload repository files
+            await this.loadRepositoryFiles(repositoryUid);
+        },
+
+        handleFileSelection(event) {
+            this.selectedFiles = Array.from(event.target.files);
+        },
+
+        async downloadFile(file) {
+            try {
+                const downloadUrl = `/Marti/sync/content?hash=${file.Hash}`;
+                
+                // Create temporary link and trigger download
+                const link = document.createElement('a');
+                link.href = downloadUrl;
+                link.download = file.FileName.replace(/^[^_]*_/, ''); // Remove repository UID prefix
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (error) {
+                console.error('Download failed:', error);
+                alert('Download failed: ' + error.message);
+            }
+        },
+
+        async viewFile(file) {
+            if (file.MIMEType && file.MIMEType.startsWith('video/')) {
+                // Open video in existing video overlay
+                const videoUrl = `/Marti/sync/content?hash=${file.Hash}`;
+                this.currentVideo = {
+                    url: videoUrl,
+                    visible: true,
+                    title: file.FileName.replace(/^[^_]*_/, ''), // Remove repository UID prefix
+                    isLive: false
+                };
+                // Hide file repository modal
+                this.currentFileRepository.visible = false;
+            } else if (file.MIMEType && file.MIMEType.startsWith('image/')) {
+                // Open image in new tab/window
+                const imageUrl = `/Marti/sync/content?hash=${file.Hash}`;
+                window.open(imageUrl, '_blank');
+            } else {
+                // Download other file types
+                await this.downloadFile(file);
+            }
+        },
+
+        async deleteFile(file) {
+            if (!confirm(`Are you sure you want to delete "${file.FileName.replace(/^[^_]*_/, '')}"?`)) {
+                return;
+            }
+
+            try {
+                // Note: Marti API might not have delete endpoint, this is a placeholder
+                const response = await fetch(`/Marti/sync/delete?hash=${file.Hash}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('File deleted successfully');
+                    await this.loadRepositoryFiles(this.currentFileRepository.uid);
+                } else {
+                    alert('Delete failed: ' + response.status);
+                }
+            } catch (error) {
+                console.error('Delete failed:', error);
+                alert('Delete failed: ' + error.message);
+            }
+        },
+
+        closeFileRepository() {
+            this.currentFileRepository = null;
+            this.repositoryFiles = [];
+            this.selectedFiles = null;
+            this.uploadProgress = 0;
+            this.isUploading = false;
+        },
+
+        formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+
+        getFileIcon(file) {
+            if (!file.MIMEType) return 'bi-file-earmark';
+            
+            if (file.MIMEType.startsWith('video/')) return 'bi-file-play';
+            if (file.MIMEType.startsWith('image/')) return 'bi-file-image';
+            if (file.MIMEType.startsWith('audio/')) return 'bi-file-music';
+            if (file.MIMEType.includes('pdf')) return 'bi-file-pdf';
+            if (file.MIMEType.includes('word')) return 'bi-file-word';
+            if (file.MIMEType.includes('excel') || file.MIMEType.includes('spreadsheet')) return 'bi-file-excel';
+            if (file.MIMEType.includes('powerpoint') || file.MIMEType.includes('presentation')) return 'bi-file-ppt';
+            if (file.MIMEType.includes('zip') || file.MIMEType.includes('rar') || file.MIMEType.includes('7z')) return 'bi-file-zip';
+            
+            return 'bi-file-earmark';
+        },
         async addCameraPoint(latlng) {
             const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "rtsp://example.com/stream");
             if (!streamUrl) {
@@ -1256,6 +1625,9 @@ class Unit {
                     // Check if this is a camera unit
                     if (vm.unit.isCamera || vm.unit.type === "b-m-p-s-p-v") {
                         vm.app.showCameraStream(vm);
+                    } else if (vm.unit.isFileRepository || vm.unit.type === "b-m-p-s-p-f") {
+                        // Check if this is a file repository unit
+                        vm.app.showFileRepository(vm);
                     } else {
                         vm.app.setCurrentUnitUid(vm.uid, false);
                     }

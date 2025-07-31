@@ -3,17 +3,13 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
+	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"os"
+	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/kdudkov/goutils/request"
-
+	"github.com/go-resty/resty/v2"
 	"github.com/kdudkov/goatak/pkg/model"
 )
 
@@ -23,82 +19,85 @@ const (
 )
 
 type RemoteAPI struct {
-	logger *slog.Logger
 	host   string
-	client *http.Client
-	tls    bool
+	client *resty.Client
+	logger *slog.Logger
 }
 
 func NewRemoteAPI(host string, logger *slog.Logger) *RemoteAPI {
+	client := resty.New()
+	client.SetTimeout(30 * time.Second)
+	client.SetRetryCount(3)
+	client.SetRetryWaitTime(1 * time.Second)
+
 	return &RemoteAPI{
-		logger: logger,
 		host:   host,
-		client: &http.Client{Timeout: httpTimeout},
+		client: client,
+		logger: logger,
 	}
 }
 
-func (r *RemoteAPI) SetTLS(config *tls.Config) {
-	r.client.Transport = &http.Transport{TLSClientConfig: config}
-	r.tls = true
+func (api *RemoteAPI) SetTLS(config *tls.Config) {
+	api.client.SetTLSClientConfig(config)
 }
 
-func (r *RemoteAPI) getURL(path string) string {
-	if r.tls {
-		return fmt.Sprintf("https://%s:8443%s", r.host, path)
+func (api *RemoteAPI) getURL(path string) string {
+	if api.host == "" {
+		return ""
 	}
 
-	return fmt.Sprintf("http://%s:8080%s", r.host, path)
+	// Handle different URL schemes
+	baseURL := api.host
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		// Add port 8080 if host doesn't contain a port
+		if !strings.Contains(baseURL, ":") {
+			baseURL = baseURL + ":8080"
+		}
+		baseURL = "http://" + baseURL
+	}
+
+	// Ensure path starts with /
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	return baseURL + path
 }
 
-func (r *RemoteAPI) request(url string) *request.Request {
-	return request.New(r.client, r.logger).URL(r.getURL(url))
+func (api *RemoteAPI) request(path string) *resty.Request {
+	url := api.getURL(path)
+	api.logger.Debug("Making request", "url", url, "path", path)
+	return api.client.R().SetHeader("Content-Type", "application/json")
 }
 
-func (r *RemoteAPI) getContacts(ctx context.Context) ([]*model.Contact, error) {
+func (api *RemoteAPI) getContacts(ctx context.Context) ([]*model.Contact, error) {
 	dat := make([]*model.Contact, 0)
 
-	err := r.request("/Marti/api/contacts/all").GetJSON(ctx, &dat)
+	resp, err := api.request("/Marti/api/contacts/all").SetContext(ctx).Get(api.getURL("/Marti/api/contacts/all"))
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(resp.Body(), &dat)
+	if err != nil {
+		return nil, err
+	}
 
 	return dat, err
 }
 
-func (r *RemoteAPI) getConfig(ctx context.Context, uid string) (string, error) {
-
-	resp, err := r.request("/Marti/api/device/profile/connection").Args(map[string]string{"clientUid": uid}).DoRes(ctx)
-
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != 200 {
-		return "", errors.New("bad status " + resp.Status)
-	}
-
-	if resp.Body == nil {
-		return "", errors.New("null body")
-	}
-
-	defer resp.Body.Close()
-
-	disp := resp.Header.Get(fiber.HeaderContentDisposition)
-
-	fname := fmt.Sprintf("config_%s.zip", uid)
-
-	if disp != "" {
-		r.logger.Info("Content: " + disp)
-	}
-
-	fd, err := os.Create(fname)
+func (api *RemoteAPI) getConfig(ctx context.Context, uid string) {
+	resp, err := api.request("/api/config").
+		SetQueryParam("uid", uid).
+		SetContext(ctx).
+		Get(api.getURL("/api/config"))
 
 	if err != nil {
-		return "", err
+		api.logger.Warn("Failed to get config", "error", err)
+		return
 	}
 
-	defer fd.Close()
-
-	_, err = io.Copy(fd, resp.Body)
-
-	return fname, err
+	api.logger.Info("Config retrieved", "status", resp.StatusCode())
 }
 
 func (app *App) periodicGetter(ctx context.Context) {

@@ -38,7 +38,6 @@ func NewHttp(app *App) *fiber.App {
 	srv.Get("/api/types", getTypes)
 	srv.Post("/api/dp", getDpHandler(app))
 	srv.Post("/api/pos", getPosHandler(app))
-
 	srv.Get("/ws", getWsHandler(app))
 
 	srv.Get("/api/unit", getUnitsHandler(app))
@@ -48,6 +47,10 @@ func NewHttp(app *App) *fiber.App {
 	srv.Delete("/api/unit/:uid", deleteItemHandler(app))
 
 	srv.Get("/stack", getStackHandler())
+
+	// Add Marti API routes
+	srv.All("/Marti/*", getMartiProxyHandler(app))
+	srv.All("/api/*", getMartiProxyHandler(app))
 
 	return srv
 }
@@ -141,10 +144,6 @@ func addItemHandler(app *App) fiber.Handler {
 
 		msg := wu.ToMsg()
 
-		if wu.Send {
-			app.SendMsg(msg.GetTakMessage())
-		}
-
 		var u *model.Item
 		if wu.Category == "unit" || wu.Category == "point" {
 			if u = app.items.Get(msg.GetUID()); u != nil {
@@ -157,6 +156,13 @@ func addItemHandler(app *App) fiber.Handler {
 				u.SetSend(wu.Send)
 				app.items.Store(u)
 			}
+		}
+
+		if wu.Send {
+			app.logger.Info("SendMsg called for unit with send=true", "uid", wu.UID)
+			app.SendMsg(msg.GetTakMessage())
+		} else {
+			app.logger.Info("Unit created with send=false", "uid", wu.UID)
 		}
 
 		return ctx.JSON(u.ToWeb())
@@ -266,5 +272,53 @@ func getLayers() []map[string]any {
 			"url":     "https://core-renderer-tiles.maps.yandex.net/tiles?l=map&x={x}&y={y}&z={z}&scale=2&lang=ru_RU&projection=web_mercator",
 			"maxzoom": 20,
 		},
+	}
+}
+
+func getMartiProxyHandler(app *App) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		if app.remoteAPI.host == "" {
+			return ctx.SendStatus(fiber.StatusServiceUnavailable)
+		}
+
+		path := ctx.Path()
+		method := ctx.Method()
+
+		// Create the request
+		req := app.remoteAPI.request(path)
+
+		// Copy headers
+		for key, values := range ctx.GetReqHeaders() {
+			for _, value := range values {
+				req.SetHeader(key, value)
+			}
+		}
+
+		// Copy body for POST/PUT requests
+		if method == "POST" || method == "PUT" {
+			req.SetBody(ctx.Body())
+		}
+
+		// Copy query parameters
+		for key, value := range ctx.Queries() {
+			req.SetQueryParam(key, value)
+		}
+
+		// Execute request
+		resp, err := req.SetContext(ctx.Context()).Execute(method, app.remoteAPI.getURL(path))
+		if err != nil {
+			app.logger.Warn("Failed to proxy request", "error", err, "path", path)
+			return ctx.SendStatus(fiber.StatusBadGateway)
+		}
+
+		// Copy response headers
+		for key, values := range resp.Header() {
+			for _, value := range values {
+				ctx.Set(key, value)
+			}
+		}
+
+		ctx.Status(resp.StatusCode())
+		return ctx.Send(resp.Body())
 	}
 }
