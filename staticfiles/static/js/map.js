@@ -590,17 +590,11 @@ const app = Vue.createApp({
                     
                     const formData = new FormData();
                     
-                    // Try different field names that the backend might expect
-                    // Most common field names for file uploads:
-                    // 1. 'file' - most common
-                    // 2. 'upload' - alternative
-                    // 3. The original filename - some backends expect this
-                    
                     // Create a new file with the modified name
                     const renamedFile = new File([file], modifiedFileName, { type: file.type });
                     
                     // Try 'file' as the field name (most common)
-                    formData.append('file', renamedFile);
+                    formData.append('assetFile', renamedFile);
                     
                     // Also try adding the file with its name as the field name
                     // Some backends expect this format
