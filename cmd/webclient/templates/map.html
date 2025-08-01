@@ -157,7 +157,7 @@
 
 <body>
     <div id="app" class="vh-100 d-flex flex-column">
-        <nav class="navbar navbar-expand-md navbar-dark">
+        <nav class="navbar navbar-expand-md navbar-dark bg-dark">
             <div class="container-fluid">
                 <a class="navbar-brand" href="#">
                     <img src="/static/images/L3Harris_logo_tag_rev_rgb.png" alt="Company Logo" height="40"
@@ -166,6 +166,11 @@
 
                 <span class="badge rounded-pill"
                     :class="{ 'text-bg-success': status == 'connected', 'text-bg-secondary': status == '', 'text-bg-danger': status == 'error'}">&nbsp;</span>
+
+                <!-- Hamburger button for mobile -->
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
 
                 <div class="collapse navbar-collapse" id="navbarCollapse">
                     <ul class="navbar-nav ms-auto mb-2 mb-md-0">

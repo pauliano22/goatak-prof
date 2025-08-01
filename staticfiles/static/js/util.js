@@ -27,6 +27,54 @@ const roles = new Map([
 ]);
 
 function getIconUri(item, size, withText) {
+    // Add camera/video type support at the top of the function
+    if (item.type === "b-m-p-s-p-v") {  // Camera/video type
+        return {uri: "/static/icons/camera.png", x: size/2, y: size/2};
+    }
+    
+    // Fire and hazard types
+    if (item.type === "b-r-f-h-c") {
+        // Check based on the tool used to create it
+        if (item.callsign?.includes("Wildfire") || item.text?.includes("Wildfire")) {
+            return {uri: "/static/icons/wildfire.png", x: 16, y: 16};
+        } else if (item.callsign?.includes("Hazard") || item.text?.includes("Hazard")) {
+            return {uri: "/static/icons/hazard.png", x: 16, y: 16};
+        } else {
+            // Regular fire
+            return {uri: "/static/icons/fire.png", x: 16, y: 16};
+        }
+    }
+    
+    // Water source
+    if (item.type === "b-m-p-w") {
+        return {uri: "/static/icons/water.png", x: 16, y: 16};
+    }
+    
+    // Helipad
+    if (item.type === "b-m-p-s-h") {
+        return {uri: "/static/icons/helipad.png", x: 16, y: 16};
+    }
+    
+    // Staging area
+    if (item.type === "b-m-p-s-p-l") {
+        return {uri: "/static/icons/staging.png", x: 16, y: 16};
+    }
+    
+    // Headquarters
+    if (item.type === "b-m-p-s-p-h") {
+        return {uri: "/static/icons/hq.png", x: 16, y: 16};
+    }
+    
+    // Supply point
+    if (item.type === "b-m-p-s-p-s") {
+        return {uri: "/static/icons/supply.png", x: 16, y: 16};
+    }
+    
+    // Cache point
+    if (item.type === "b-m-p-s-p-c") {
+        return {uri: "/static/icons/cache.png", x: 16, y: 16};
+    }
+    
     if (item.team && item.role) {
         let col = "#555";
         if (item.status !== "Offline") {
@@ -59,6 +107,32 @@ function getIconUri(item, size, withText) {
     if (item.type === "b-m-p-a") {
         return {uri: "/static/icons/aimpoint.png", x: 16, y: 16}
     }
+
+    // Additional icon mapping
+    if (item.type === "b-m-p-c") {
+        return {uri: "/static/icons/checkpoint.png", x: 16, y: 16}
+    }
+
+    // Mode-specific icons
+    if (item.mode) {
+        // Water source
+        if (item.type === "b-r-f-w") {
+            return {uri: toUri(circle(20, '#0000ff', '#000', 'W')), x: 10, y: 10}
+        }
+        // Helipad
+        if (item.type === "b-r-f-h-h") {
+            return {uri: toUri(circleWithH(20, '#00ff00')), x: 10, y: 10}
+        }
+        // Evidence
+        if (item.type === "b-m-p-s-e") {
+            return {uri: toUri(circle(20, '#ffff00', '#000', 'E')), x: 10, y: 10}
+        }
+        // Medical casualty
+        if (item.type === "b-r-f-m-c") {
+            return {uri: toUri(circleWithCross(20, '#ff0000')), x: 10, y: 10}
+        }
+    }
+
     if (item.category === "point") {
         return {uri: toUri(circle(16, item.color || '#f00', '#000', null)), x: 8, y: 8}
     }
