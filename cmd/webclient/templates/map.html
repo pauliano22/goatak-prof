@@ -11,6 +11,20 @@
     
     <!-- Additional styles for camera streaming and file repository -->
     <style>
+        /* Dropdown arrow rotation animation */
+        .dropdown-toggle::after {
+            transition: transform 0.2s ease-in-out;
+        }
+        
+        .dropdown-toggle[aria-expanded="true"]::after {
+            transform: rotate(180deg);
+        }
+        
+        /* Ensure dropdown menus appear above other content */
+        .dropdown-menu {
+            z-index: 1050;
+        }
+        
         .video-overlay {
             position: fixed;
             top: 0;
@@ -836,6 +850,47 @@
     
     <!-- HLS.js for HLS stream support -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    
+    <!-- Bootstrap Dropdown Fix -->
+    <script>
+        // Ensure dropdowns work properly
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize all dropdowns manually if needed
+            var dropdowns = document.querySelectorAll('.dropdown-toggle');
+            dropdowns.forEach(function(dropdown) {
+                dropdown.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    var dropdownMenu = this.nextElementSibling;
+                    var isOpen = dropdownMenu.classList.contains('show');
+                    
+                    // Close all other dropdowns
+                    document.querySelectorAll('.dropdown-menu.show').forEach(function(menu) {
+                        menu.classList.remove('show');
+                        menu.previousElementSibling.setAttribute('aria-expanded', 'false');
+                    });
+                    
+                    // Toggle current dropdown
+                    if (!isOpen) {
+                        dropdownMenu.classList.add('show');
+                        this.setAttribute('aria-expanded', 'true');
+                    } else {
+                        dropdownMenu.classList.remove('show');
+                        this.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            });
+            
+            // Close dropdowns when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.dropdown')) {
+                    document.querySelectorAll('.dropdown-menu.show').forEach(function(menu) {
+                        menu.classList.remove('show');
+                        menu.previousElementSibling.setAttribute('aria-expanded', 'false');
+                    });
+                }
+            });
+        });
+    </script>
     
     <!-- UUID generator -->
     <script>
