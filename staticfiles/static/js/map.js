@@ -1024,8 +1024,8 @@ const app = Vue.createApp({
 
                 if (response.ok) {
                     const result = await response.text();
-                    console.log('Recording saved successfully to tools/videos:', result);
-                    alert(`Recording saved successfully as ${filename}\n\nSaved to: tools/videos/${filename}`);
+                    console.log('Recording saved successfully to data/videos:', result);
+                    alert(`Recording saved successfully as ${filename}\n\nSaved to: data/videos/${filename}`);
                 } else {
                     const errorText = await response.text();
                     console.error('Upload failed:', response.status, errorText);

@@ -278,14 +278,14 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 		return nil, err
 	}
 
-	// Check if this is a video file that should go to tools/videos
+	// Check if this is a video file that should go to data/videos
 	isVideoForTools := strings.Contains(filename, "webcam-recording")
 
 	if isVideoForTools {
-		app.logger.Info("processing video for tools/videos", slog.String("filename", filename))
+		app.logger.Info("processing video for data/videos", slog.String("filename", filename))
 
-		// Save to tools/videos directory - THIS IS THE KEY PART
-		videosDir := "tools/videos"
+		// Save to data/videos directory - consistent with other server data
+		videosDir := filepath.Join(app.config.DataDir(), "videos")
 		if err := os.MkdirAll(videosDir, 0755); err != nil {
 			app.logger.Error("failed to create videos directory", slog.Any("error", err))
 			return nil, err
@@ -303,7 +303,7 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 		}
 		defer f.Close()
 
-		// Create the destination file in tools/videos
+		// Create the destination file in data/videos
 		outFile, err := os.Create(videoPath)
 		if err != nil {
 			app.logger.Error("failed to create video file", slog.Any("error", err))
@@ -311,14 +311,14 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 		}
 		defer outFile.Close()
 
-		// Copy the uploaded file to tools/videos
+		// Copy the uploaded file to data/videos
 		copied, err := io.Copy(outFile, f)
 		if err != nil {
 			app.logger.Error("failed to copy video file", slog.Any("error", err))
 			return nil, err
 		}
 
-		app.logger.Info("video saved to tools/videos",
+		app.logger.Info("video saved to data/videos",
 			slog.String("filename", cleanFilename),
 			slog.String("path", videoPath),
 			slog.Int64("bytes", copied))
@@ -326,7 +326,7 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 		// Create a simple resource record
 		c := &model.Resource{
 			Scope:          user.GetScope(),
-			Hash:           "tools-video-" + cleanFilename,
+			Hash:           "video-" + cleanFilename,
 			UID:            uid,
 			Name:           filename,
 			FileName:       cleanFilename,
@@ -335,7 +335,7 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 			SubmissionUser: user.GetLogin(),
 			CreatorUID:     queryIgnoreCase(ctx, "creatorUid"),
 			Tool:           "webcam-recorder",
-			Keywords:       "tools,video,webcam-recording",
+			Keywords:       "video,webcam-recording",
 			Expiration:     -1,
 		}
 
@@ -343,7 +343,7 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 		return c, err
 	}
 
-	// Regular file upload logic (existing code)
+	// Regular file upload logic (existing code stays the same)
 	f, err := fh.Open()
 	if err != nil {
 		app.logger.Error("error opening file", slog.Any("error", err))
