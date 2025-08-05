@@ -30,6 +30,17 @@ const app = Vue.createApp({
             webcamStream: null,
             webrtcPeerConnection: null,
             hlsInstance: null,
+            // Recording additions
+            mediaRecorder: null,
+            recordedChunks: [],
+            isRecording: false,
+            standaloneRecording: {
+                isActive: false,
+                stream: null,
+                recorder: null,
+                chunks: [],
+                startTime: null
+            },
             // File repository additions
             currentFileRepository: null,
             repositoryFiles: [],
@@ -43,7 +54,7 @@ const app = Vue.createApp({
         map = L.map('map');
         map.setView([60, 30], 11);
 
-        L.control.scale({metric: true}).addTo(map);
+        L.control.scale({ metric: true }).addTo(map);
 
         this.getConfig();
 
@@ -101,7 +112,7 @@ const app = Vue.createApp({
                             .then(d => vm.types = d);
                     }
 
-                    layers = L.control.layers({}, null, {hideSingleBase: true});
+                    layers = L.control.layers({}, null, { hideSingleBase: true });
                     layers.addTo(map);
 
                     let first = true;
@@ -160,7 +171,7 @@ const app = Vue.createApp({
         fetchAllUnits: function () {
             let vm = this;
 
-            fetch('/api/unit', {redirect: 'manual'})
+            fetch('/api/unit', { redirect: 'manual' })
                 .then(resp => {
                     if (!resp.ok) {
                         window.location.reload();
@@ -173,7 +184,7 @@ const app = Vue.createApp({
         fetchMessages: function () {
             let vm = this;
 
-            fetch('/api/message', {redirect: 'manual'})
+            fetch('/api/message', { redirect: 'manual' })
                 .then(resp => {
                     if (!resp.ok) {
                         window.location.reload();
@@ -196,8 +207,8 @@ const app = Vue.createApp({
 
                 const requestOptions = {
                     method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({lat: p.lat, lon: p.lng, name: "DP1"})
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ lat: p.lat, lon: p.lng, name: "DP1" })
                 };
                 fetch("/api/dp", requestOptions);
             }
@@ -324,93 +335,109 @@ const app = Vue.createApp({
         },
 
         mapClick: function (e) {
-            // Handle camera tool
-            if (this.modeIs("camera")) {
-                this.addCameraPoint(e.latlng);
-                return;
-            }
+            let tool = document.querySelector('input[name="btnradio"]:checked').id;
 
-            // Handle file repository tool
-            if (this.modeIs("files")) {
-                this.addFileRepositoryPoint(e.latlng);
-                return;
-            }
+            switch (tool) {
+                case 'select':
+                    // No action for select mode - just click to select units
+                    break;
 
-            // Handle the 4 new point types
-            if (this.modeIs("fire")) {
-                this.createSpecialPoint(e.latlng, "Fire", "b-r-f-h-c", "Fire Location", "#ff8c00");
-                return;
-            }
-            if (this.modeIs("water")) {
-                this.createSpecialPoint(e.latlng, "Water", "b-m-p-w", "Water Source", "#0066cc");
-                return;
-            }
-            if (this.modeIs("observation")) {
-                this.createSpecialPoint(e.latlng, "Observation", "b-m-p-s-p-op", "Observation Point", "#ffff00");
-                return;
-            }
-            if (this.modeIs("hazard")) {
-                this.createSpecialPoint(e.latlng, "Hazard", "b-r-f-h-c", "Hazard", "#ff0000");
-                return;
-            }
+                case 'camera':
+                    this.addCameraPoint(e.latlng);
+                    break;
 
-            // Original handlers
-            if (this.modeIs("redx")) {
-                this.addOrMove("redx", e.latlng, "/static/icons/x.png")
-                return;
-            }
-            if (this.modeIs("dp1")) {
-                this.addOrMove("dp1", e.latlng, "/static/icons/spoi_icon.png")
-                return;
-            }
-            if (this.modeIs("point")) {
-                let uid = uuidv4();
-                let now = new Date();
-                let stale = new Date(now);
-                stale.setDate(stale.getDate() + 365);
-                let u = {
-                    uid: uid,
-                    category: "point",
-                    callsign: "point-" + this.point_num++,
-                    sidc: "",
-                    start_time: now,
-                    last_seen: now,
-                    stale_time: stale,
-                    type: "b-m-p-s-m",
-                    lat: e.latlng.lat,
-                    lon: e.latlng.lng,
-                    hae: 0,
-                    speed: 0,
-                    course: 0,
-                    status: "",
-                    text: "",
-                    parent_uid: "",
-                    parent_callsign: "",
-                    color: "#ff0000",
-                    send: false,
-                    local: true,
-                }
-                if (this.config && this.config.uid) {
-                    u.parent_uid = this.config.uid;
-                    u.parent_callsign = this.config.callsign;
-                }
+                case 'files':
+                    this.addFileRepositoryPoint(e.latlng);
+                    break;
 
-                let unit = new Unit(this, u);
-                this.units.set(unit.uid, unit);
-                unit.post();
+                case 'record':
+                    // Start standalone recording
+                    this.startStandaloneRecording();
+                    // Reset to select tool after starting recording
+                    document.getElementById('select').checked = true;
+                    break;
 
-                this.setCurrentUnitUid(u.uid, true);
-            }
-            if (this.modeIs("me")) {
-                this.config.lat = e.latlng.lat;
-                this.config.lon = e.latlng.lng;
-                this.me.setLatLng(e.latlng);
-                const requestOptions = {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({lat: e.latlng.lat, lon: e.latlng.lng})
-                };
-                fetch("/api/pos", requestOptions);
+                case 'fire':
+                    this.createSpecialPoint(e.latlng, "Fire", "b-r-f-h-c", "Fire Location", "#ff8c00");
+                    break;
+
+                case 'water':
+                    this.createSpecialPoint(e.latlng, "Water", "b-m-p-w", "Water Source", "#0066cc");
+                    break;
+
+                case 'observation':
+                    this.createSpecialPoint(e.latlng, "Observation", "b-m-p-s-p-op", "Observation Point", "#ffff00");
+                    break;
+
+                case 'hazard':
+                    this.createSpecialPoint(e.latlng, "Hazard", "b-r-f-h-c", "Hazard", "#ff0000");
+                    break;
+
+                case 'redx':
+                    this.addOrMove("redx", e.latlng, "/static/icons/x.png");
+                    break;
+
+                case 'dp1':
+                    this.addOrMove("dp1", e.latlng, "/static/icons/spoi_icon.png");
+                    break;
+
+                case 'point':
+                    let uid = uuidv4();
+                    let now = new Date();
+                    let stale = new Date(now);
+                    stale.setDate(stale.getDate() + 365);
+
+                    let u = {
+                        uid: uid,
+                        category: "point",
+                        callsign: "point-" + this.point_num++,
+                        sidc: "",
+                        start_time: now,
+                        last_seen: now,
+                        stale_time: stale,
+                        type: "b-m-p-s-m",
+                        lat: e.latlng.lat,
+                        lon: e.latlng.lng,
+                        hae: 0,
+                        speed: 0,
+                        course: 0,
+                        status: "",
+                        text: "",
+                        parent_uid: "",
+                        parent_callsign: "",
+                        color: "#ff0000",
+                        send: false,
+                        local: true,
+                    }
+
+                    if (this.config && this.config.uid) {
+                        u.parent_uid = this.config.uid;
+                        u.parent_callsign = this.config.callsign;
+                    }
+
+                    let unit = new Unit(this, u);
+                    this.units.set(unit.uid, unit);
+                    unit.post();
+
+                    this.setCurrentUnitUid(u.uid, true);
+                    break;
+
+                case 'me':
+                    this.config.lat = e.latlng.lat;
+                    this.config.lon = e.latlng.lng;
+                    this.me.setLatLng(e.latlng);
+
+                    const requestOptions = {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ lat: e.latlng.lat, lon: e.latlng.lng })
+                    };
+                    fetch("/api/pos", requestOptions);
+                    break;
+
+                default:
+                    console.log('Unknown tool selected:', tool);
+                    break;
             }
         },
 
@@ -545,18 +572,18 @@ const app = Vue.createApp({
                     this.repositoryFiles = [];
                     return;
                 }
-                
+
                 const data = await response.json();
                 const allFiles = data.results || [];
-                
+
                 // Filter files that belong to this repository
                 // We'll use a naming convention or metadata to associate files with repositories
                 this.repositoryFiles = allFiles.filter(file => {
                     // Check if file name contains repository UID or use keywords
                     return file.Keywords && file.Keywords.includes(repositoryUid) ||
-                           file.FileName && file.FileName.includes(repositoryUid);
+                        file.FileName && file.FileName.includes(repositoryUid);
                 });
-                
+
                 console.log('Found repository files:', this.repositoryFiles);
             } catch (error) {
                 console.error('Failed to load repository files:', error);
@@ -569,63 +596,63 @@ const app = Vue.createApp({
                 alert('Please select files to upload');
                 return;
             }
-        
+
             if (!this.currentFileRepository) {
                 alert('No repository selected');
                 return;
             }
-        
+
             this.isUploading = true;
             const repositoryUid = this.currentFileRepository.uid;
             const successfulUploads = [];
             const failedUploads = [];
-        
+
             for (let i = 0; i < this.selectedFiles.length; i++) {
                 const file = this.selectedFiles[i];
                 this.uploadProgress = Math.round(((i + 1) / this.selectedFiles.length) * 100);
-        
+
                 try {
                     // Add repository UID to filename to associate with this repository
                     const modifiedFileName = `${repositoryUid}_${file.name}`;
-                    
+
                     const formData = new FormData();
-                    
+
                     // Create a new file with the modified name
                     const renamedFile = new File([file], modifiedFileName, { type: file.type });
-                    
+
                     // Try 'file' as the field name (most common)
                     formData.append('assetFile', renamedFile);
-                    
+
                     // Also try adding the file with its name as the field name
                     // Some backends expect this format
                     formData.append(modifiedFileName, renamedFile);
-                    
+
                     // Add keywords to associate with repository
                     formData.append('keywords', repositoryUid);
-                    
+
                     // Some backends expect additional metadata
                     formData.append('filename', modifiedFileName);
                     formData.append('name', modifiedFileName);
-        
+
                     // Try without the query parameter first
                     let response = await fetch('/Marti/sync/upload', {
                         method: 'POST',
                         body: formData
                         // Don't set Content-Type header - let browser set it with boundary
                     });
-        
+
                     // If that fails, try with the name parameter
                     if (!response.ok && response.status === 406) {
                         // Create new FormData for second attempt
                         const formData2 = new FormData();
                         formData2.append('file', renamedFile);
-                        
+
                         response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
                             method: 'POST',
                             body: formData2
                         });
                     }
-        
+
                     // If still failing, try raw file upload
                     if (!response.ok && response.status === 406) {
                         response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
@@ -636,7 +663,7 @@ const app = Vue.createApp({
                             body: file // Send raw file data
                         });
                     }
-        
+
                     if (response.ok) {
                         const result = await response.text();
                         console.log('File uploaded successfully:', result);
@@ -651,11 +678,11 @@ const app = Vue.createApp({
                     failedUploads.push(file.name);
                 }
             }
-        
+
             this.isUploading = false;
             this.uploadProgress = 0;
             this.selectedFiles = null;
-        
+
             // Show results
             let message = `Upload complete!\nSuccessful: ${successfulUploads.length}`;
             if (failedUploads.length > 0) {
@@ -665,7 +692,7 @@ const app = Vue.createApp({
                 }
             }
             alert(message);
-        
+
             // Reload repository files
             await this.loadRepositoryFiles(repositoryUid);
         },
@@ -677,7 +704,7 @@ const app = Vue.createApp({
         async downloadFile(file) {
             try {
                 const downloadUrl = `/Marti/sync/content?hash=${file.Hash}`;
-                
+
                 // Create temporary link and trigger download
                 const link = document.createElement('a');
                 link.href = downloadUrl;
@@ -754,7 +781,7 @@ const app = Vue.createApp({
 
         getFileIcon(file) {
             if (!file.MIMEType) return 'bi-file-earmark';
-            
+
             if (file.MIMEType.startsWith('video/')) return 'bi-file-play';
             if (file.MIMEType.startsWith('image/')) return 'bi-file-image';
             if (file.MIMEType.startsWith('audio/')) return 'bi-file-music';
@@ -763,7 +790,7 @@ const app = Vue.createApp({
             if (file.MIMEType.includes('excel') || file.MIMEType.includes('spreadsheet')) return 'bi-file-excel';
             if (file.MIMEType.includes('powerpoint') || file.MIMEType.includes('presentation')) return 'bi-file-ppt';
             if (file.MIMEType.includes('zip') || file.MIMEType.includes('rar') || file.MIMEType.includes('7z')) return 'bi-file-zip';
-            
+
             return 'bi-file-earmark';
         },
         async addCameraPoint(latlng) {
@@ -875,7 +902,7 @@ const app = Vue.createApp({
         handleRTSPStream(unit, streamUrl) {
             console.log('RTSP stream detected');
             alert(`RTSP Stream: ${streamUrl}\n\nNote: RTSP streams cannot be played directly in browsers. Consider using:\n- MediaMTX to convert to WebRTC/HLS\n- VLC Web Plugin\n- A streaming server that converts RTSP to browser-compatible formats`);
-            
+
             // You could implement WebRTC conversion here or redirect to an external player
             // For now, we'll just display the RTSP URL
             this.currentVideo.isRTSP = true;
@@ -883,17 +910,17 @@ const app = Vue.createApp({
 
         async handleWebcamStream(unit) {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { width: 1280, height: 720 }, 
-                    audio: false 
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 1280, height: 720 },
+                    audio: false
                 });
-                
+
                 this.webcamStream = stream;
                 this.currentVideo.stream = stream;
-                
+
                 // Wait for DOM update
                 await this.$nextTick();
-                
+
                 const videoElement = document.querySelector('.video-overlay video');
                 if (videoElement) {
                     videoElement.srcObject = stream;
@@ -905,10 +932,204 @@ const app = Vue.createApp({
             }
         },
 
+        // Standalone recording functions
+        async startStandaloneRecording() {
+            try {
+                // Get webcam stream
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 1280, height: 720 },
+                    audio: true // Include audio for video recording
+                });
+
+                this.standaloneRecording.stream = stream;
+                this.standaloneRecording.startTime = new Date();
+
+                // Set up media recorder
+                this.standaloneRecording.recorder = new MediaRecorder(stream, {
+                    mimeType: 'video/webm;codecs=vp9'
+                });
+
+                this.standaloneRecording.chunks = [];
+
+                this.standaloneRecording.recorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        this.standaloneRecording.chunks.push(event.data);
+                    }
+                };
+
+                this.standaloneRecording.recorder.onstop = () => {
+                    const blob = new Blob(this.standaloneRecording.chunks, { type: 'video/webm' });
+                    this.saveStandaloneRecording(blob);
+                    this.stopStandaloneRecording();
+                };
+
+                // Show recording overlay
+                this.currentVideo = {
+                    visible: true,
+                    isWebcam: true,
+                    isStandaloneRecording: true,
+                    title: 'Recording Video...',
+                    stream: stream
+                };
+
+                this.standaloneRecording.isActive = true;
+                this.standaloneRecording.recorder.start();
+
+                // Set up video element
+                await this.$nextTick();
+                const videoElement = document.querySelector('.video-overlay video');
+                if (videoElement) {
+                    videoElement.srcObject = stream;
+                    videoElement.play().catch(console.error);
+                }
+
+                console.log('Standalone recording started');
+
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                alert('Could not access webcam: ' + error.message);
+            }
+        },
+
+        stopStandaloneRecording() {
+            if (this.standaloneRecording.recorder && this.standaloneRecording.isActive) {
+                this.standaloneRecording.recorder.stop();
+            }
+
+            if (this.standaloneRecording.stream) {
+                this.standaloneRecording.stream.getTracks().forEach(track => track.stop());
+                this.standaloneRecording.stream = null;
+            }
+
+            this.standaloneRecording.isActive = false;
+            console.log('Standalone recording stopped');
+        },
+
+        async saveStandaloneRecording(blob) {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `webcam-recording-${timestamp}.webm`;
+
+            try {
+                // Upload to tools/videos directory
+                const formData = new FormData();
+                formData.append('video', blob, filename);
+
+                const response = await fetch('/api/videos/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    alert(`Recording saved successfully as ${filename}`);
+                } else {
+                    // Fallback: download to user's computer
+                    this.downloadRecording(blob, filename);
+                }
+            } catch (error) {
+                console.error('Upload failed:', error);
+                // Fallback: download to user's computer
+                this.downloadRecording(blob, filename);
+            }
+        },
+
+        downloadRecording(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            alert(`Recording downloaded as ${filename}`);
+        },
+
+        // Add this after the handleWebcamStream function
+        startRecording() {
+            if (this.webcamStream) {
+                this.mediaRecorder = new MediaRecorder(this.webcamStream, {
+                    mimeType: 'video/webm;codecs=vp9'
+                });
+                this.recordedChunks = [];
+
+                this.mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        this.recordedChunks.push(event.data);
+                    }
+                };
+
+                this.mediaRecorder.onstop = () => {
+                    const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
+                    this.uploadRecordedVideo(blob);
+                };
+
+                this.mediaRecorder.start();
+                this.isRecording = true;
+                console.log('Recording started');
+            } else {
+                alert('No webcam stream available to record');
+            }
+        },
+
+        stopRecording() {
+            if (this.mediaRecorder && this.isRecording) {
+                this.mediaRecorder.stop();
+                this.isRecording = false;
+                console.log('Recording stopped');
+            }
+        },
+
+        async uploadRecordedVideo(blob) {
+            if (!this.currentFileRepository) {
+                // Create a default filename
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const filename = `webcam-recording-${timestamp}.webm`;
+
+                // Create download link
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                alert('Recording saved to downloads folder');
+                return;
+            }
+
+            try {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const filename = `${this.currentFileRepository.uid}_webcam-recording-${timestamp}.webm`;
+
+                const formData = new FormData();
+                formData.append('assetfile', blob, filename);
+                formData.append('keywords', this.currentFileRepository.uid);
+                formData.append('filename', filename);
+
+                const response = await fetch('/Marti/sync/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    alert('Recording uploaded to file repository successfully');
+                    await this.loadRepositoryFiles(this.currentFileRepository.uid);
+                } else {
+                    throw new Error(`Upload failed: ${response.status}`);
+                }
+            } catch (error) {
+                console.error('Upload failed:', error);
+                alert('Upload failed: ' + error.message);
+            }
+        },
+
         async handleWebRTCStream(unit, streamUrl) {
             console.log('Handling WebRTC stream');
             await this.$nextTick();
-            
+
             try {
                 await this.setupWebRTCPlayer(streamUrl);
             } catch (error) {
@@ -1014,6 +1235,16 @@ const app = Vue.createApp({
         stopVideo() {
             console.log('Stopping video playback');
 
+            // Stop standalone recording if active
+            if (this.standaloneRecording.isActive) {
+                this.stopStandaloneRecording();
+            }
+
+            // Stop recording if active
+            if (this.isRecording) {
+                this.stopRecording();
+            }
+
             // Clean up WebRTC
             if (this.webrtcPeerConnection) {
                 this.webrtcPeerConnection.close();
@@ -1052,7 +1283,7 @@ const app = Vue.createApp({
         },
 
         // Helper method to create the 4 special point types
-        createSpecialPoint: function(latlng, name, type, text, color) {
+        createSpecialPoint: function (latlng, name, type, text, color) {
             let uid = uuidv4();
             let now = new Date();
             let stale = new Date(now);
@@ -1094,7 +1325,7 @@ const app = Vue.createApp({
         },
 
         // Toggle multi-select mode
-        toggleMultiSelect: function() {
+        toggleMultiSelect: function () {
             this.multiSelectMode = !this.multiSelectMode;
             if (!this.multiSelectMode) {
                 // Clear selections when exiting multi-select
@@ -1108,8 +1339,8 @@ const app = Vue.createApp({
                 }
             }
         },
-        
-        toggleUnitSelection: function(uid) {
+
+        toggleUnitSelection: function (uid) {
             if (this.selectedUnits.has(uid)) {
                 this.selectedUnits.delete(uid);
             } else {
@@ -1121,10 +1352,10 @@ const app = Vue.createApp({
                 unit.updateMarker();
             }
         },
-        
-        deleteSelectedUnits: function() {
+
+        deleteSelectedUnits: function () {
             if (this.selectedUnits.size === 0) return;
-            
+
             if (confirm(`Delete ${this.selectedUnits.size} selected items?`)) {
                 let deletePromises = [];
                 this.selectedUnits.forEach(uid => {
@@ -1132,7 +1363,7 @@ const app = Vue.createApp({
                         fetch("/api/unit/" + uid, { method: "DELETE" })
                     );
                 });
-                
+
                 Promise.all(deletePromises).then(() => {
                     this.selectedUnits.clear();
                     this.multiSelectMode = false;
@@ -1140,27 +1371,27 @@ const app = Vue.createApp({
                 });
             }
         },
-        
-        redrawAllMarkers: function() {
+
+        redrawAllMarkers: function () {
             this.units.forEach(unit => {
                 unit.updateMarker();
             });
         },
 
-        clearAllPoints: function() {
+        clearAllPoints: function () {
             // Get all units that are points (any category that's not contact or unit)
             const pointUnits = Array.from(this.units.values())
                 .filter(u => u.unit.category === 'point') // This includes fires, hazards, water points, observation points, etc.
                 .map(u => u.uid);
-            
+
             if (pointUnits.length === 0) {
                 alert('No points to clear');
                 return;
             }
-            
+
             if (confirm(`Are you sure you want to clear all ${pointUnits.length} points? This includes fires, hazards, water sources, observation points, and all other map points.`)) {
                 console.log('Clearing all points:', pointUnits);
-                
+
                 // Delete each point with better error handling
                 let deletePromises = pointUnits.map(uid => {
                     console.log('Deleting point:', uid);
@@ -1177,22 +1408,22 @@ const app = Vue.createApp({
                             return false;
                         });
                 });
-                
+
                 Promise.all(deletePromises)
                     .then(results => {
                         const successful = results.filter(r => r === true).length;
                         const failed = results.filter(r => r === false).length;
-                        
+
                         console.log(`Deleted ${successful} points, ${failed} failed`);
-                        
+
                         // Clear from local state immediately
                         pointUnits.forEach(uid => {
                             this.removeUnit(uid);
                         });
-                        
+
                         // Refresh from server
                         this.fetchAllUnits();
-                        
+
                         if (failed > 0) {
                             alert(`${successful} points cleared, ${failed} failed. Check console for details.`);
                         } else {
@@ -1496,7 +1727,7 @@ const app = Vue.createApp({
 
         deleteCurrentUnit: function () {
             if (!this.current_unit_uid) return;
-            fetch("/api/unit/" + this.current_unit_uid, {method: "DELETE"});
+            fetch("/api/unit/" + this.current_unit_uid, { method: "DELETE" });
         },
 
         sendMessage: function () {
@@ -1511,7 +1742,7 @@ const app = Vue.createApp({
 
             const requestOptions = {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(msg)
             };
             let vm = this;
@@ -1608,7 +1839,7 @@ class Unit {
             // Add visual indicator for selected state
             this.marker.setOpacity(this.app.selectedUnits.has(this.uid) ? 0.5 : 1.0);
         } else {
-            this.marker = L.marker(this.coords(), {draggable: this.unit.local ? 'true' : 'false'});
+            this.marker = L.marker(this.coords(), { draggable: this.unit.local ? 'true' : 'false' });
             this.marker.setIcon(getIcon(this.unit, true));
 
             let vm = this;
@@ -1673,7 +1904,7 @@ class Unit {
     post() {
         const requestOptions = {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(this.unit)
         };
         let vm = this;

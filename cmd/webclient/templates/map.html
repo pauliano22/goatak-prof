@@ -8,23 +8,54 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <link href="styles.css" rel="stylesheet">
-    
+
     <!-- Additional styles for camera streaming and file repository -->
     <style>
+        /* Recording indicator */
+        .recording-indicator {
+            position: absolute;
+            top: 60px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 12px;
+            border-radius: 6px;
+            z-index: 10001;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 4px;
+        }
+
         /* Dropdown arrow rotation animation */
         .dropdown-toggle::after {
             transition: transform 0.2s ease-in-out;
         }
-        
+
         .dropdown-toggle[aria-expanded="true"]::after {
             transform: rotate(180deg);
         }
-        
+
         /* Ensure dropdown menus appear above other content */
         .dropdown-menu {
             z-index: 1050;
         }
-        
+
         .video-overlay {
             position: fixed;
             top: 0;
@@ -37,7 +68,7 @@
             align-items: center;
             justify-content: center;
         }
-        
+
         .video-container {
             position: relative;
             max-width: 90%;
@@ -47,7 +78,7 @@
             overflow: hidden;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
         }
-        
+
         .video-container video {
             width: 100%;
             height: 100%;
@@ -55,14 +86,14 @@
             max-height: 800px;
             display: block;
         }
-        
+
         .video-controls {
             position: absolute;
             top: 15px;
             right: 15px;
             z-index: 10001;
         }
-        
+
         .video-title {
             position: absolute;
             top: 15px;
@@ -73,7 +104,7 @@
             z-index: 10001;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
         }
-        
+
         .video-info {
             position: absolute;
             bottom: 15px;
@@ -84,60 +115,60 @@
             z-index: 10001;
             text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
         }
-        
+
         .rtsp-info {
             max-width: 600px;
             margin: 0 auto;
             padding: 2rem;
             text-align: left;
         }
-        
+
         .rtsp-info h4 {
             color: #ffc107;
             margin-bottom: 1.5rem;
             font-weight: 600;
         }
-        
+
         .rtsp-info .card {
             background-color: rgba(33, 37, 41, 0.8) !important;
         }
-        
+
         .rtsp-info .alert {
             background-color: rgba(255, 193, 7, 0.1);
             border: 1px solid rgba(255, 193, 7, 0.3);
             color: #fff3cd;
         }
-        
+
         .rtsp-info .alert-heading {
             color: #ffc107;
             font-weight: 600;
             margin-bottom: 0.75rem;
         }
-        
+
         .rtsp-info ul {
             padding-left: 1.2rem;
         }
-        
+
         .rtsp-info li {
             margin-bottom: 0.25rem;
         }
-        
+
         .video-overlay .btn {
             backdrop-filter: blur(5px);
             background: rgba(255, 255, 255, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.2);
             color: white;
         }
-        
+
         .video-overlay .btn:hover {
             background: rgba(255, 255, 255, 0.2);
             color: white;
         }
-        
+
         .video-overlay .btn-close-white {
             filter: invert(1);
         }
-        
+
         /* File repository modal styles */
         .file-repository-modal {
             position: fixed;
@@ -151,18 +182,18 @@
             align-items: center;
             justify-content: center;
         }
-        
+
         .file-repository-modal .modal-content {
             max-width: 90vw;
             max-height: 90vh;
             width: 1200px;
             overflow-y: auto;
         }
-        
+
         .file-card {
             transition: transform 0.2s ease-in-out;
         }
-        
+
         .file-card:hover {
             transform: translateY(-2px);
         }
@@ -182,7 +213,8 @@
                     :class="{ 'text-bg-success': status == 'connected', 'text-bg-secondary': status == '', 'text-bg-danger': status == 'error'}">&nbsp;</span>
 
                 <!-- Hamburger button for mobile -->
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse"
+                    aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
 
@@ -313,6 +345,9 @@
                                 <input type="radio" class="btn-check" name="btnradio" id="files" autocomplete="off">
                                 <label class="tool-btn" for="files">Files</label>
 
+                                <input type="radio" class="btn-check" name="btnradio" id="record" autocomplete="off">
+                                <label class="tool-btn" for="record">Record</label>
+
                                 <input type="radio" class="btn-check" name="btnradio" id="me" autocomplete="off"
                                     v-if="config && config.callsign">
                                 <label class="tool-btn" for="me" v-if="config && config.callsign">Me</label>
@@ -385,21 +420,20 @@
                             </div>
                             <div v-else>
                                 <!-- Camera stream button for camera points -->
-                                <button v-if="current_unit.unit.isCamera || current_unit.unit.type === 'b-m-p-s-p-v'" 
-                                        class="btn btn-sm btn-outline-info ms-1 fw-regular"
-                                        @click="showCameraStream(current_unit)"
-                                        title="View Camera Stream">
+                                <button v-if="current_unit.unit.isCamera || current_unit.unit.type === 'b-m-p-s-p-v'"
+                                    class="btn btn-sm btn-outline-info ms-1 fw-regular"
+                                    @click="showCameraStream(current_unit)" title="View Camera Stream">
                                     <i class="bi bi-camera-video"></i>
                                 </button>
-                                
+
                                 <!-- File repository button for file repository points -->
-                                <button v-if="current_unit.unit.isFileRepository || current_unit.unit.type === 'b-m-p-s-p-f'" 
-                                        class="btn btn-sm btn-outline-success ms-1 fw-regular"
-                                        @click="showFileRepository(current_unit)"
-                                        title="Open File Repository">
+                                <button
+                                    v-if="current_unit.unit.isFileRepository || current_unit.unit.type === 'b-m-p-s-p-f'"
+                                    class="btn btn-sm btn-outline-success ms-1 fw-regular"
+                                    @click="showFileRepository(current_unit)" title="Open File Repository">
                                     <i class="bi bi-folder"></i>
                                 </button>
-                                
+
                                 <button class="btn btn-sm btn-outline-primary ms-1 fw-regular" data-bs-toggle="modal"
                                     data-bs-target="#edit">
                                     <i class="bi bi-pencil-square"></i>
@@ -420,19 +454,23 @@
                                 <b class="fw-medium">Type:</b> {{ current_unit.unit.type }} <b
                                     class="fw-medium">SIDC:</b> {{ current_unit.unit.sidc }}
                             </div>
-                            
+
                             <!-- Show stream info for camera points -->
                             <div v-if="current_unit.unit.isCamera || current_unit.unit.type === 'b-m-p-s-p-v'">
-                                <b class="fw-medium">Stream:</b> <span class="fw-light">{{ current_unit.unit.streamUrl || 'Not configured' }}</span><br />
-                                <b class="fw-medium">Type:</b> <span class="fw-light badge bg-info">{{ current_unit.unit.streamType || 'unknown' }}</span>
+                                <b class="fw-medium">Stream:</b> <span class="fw-light">{{ current_unit.unit.streamUrl
+                                    || 'Not configured' }}</span><br />
+                                <b class="fw-medium">Type:</b> <span class="fw-light badge bg-info">{{
+                                    current_unit.unit.streamType || 'unknown' }}</span>
                             </div>
-                            
+
                             <!-- Show repository info for file repository points -->
                             <div v-if="current_unit.unit.isFileRepository || current_unit.unit.type === 'b-m-p-s-p-f'">
-                                <b class="fw-medium">Repository:</b> <span class="fw-light">{{ current_unit.unit.repositoryName || current_unit.unit.callsign }}</span><br />
-                                <b class="fw-medium">Type:</b> <span class="fw-light badge bg-success">File Repository</span>
+                                <b class="fw-medium">Repository:</b> <span class="fw-light">{{
+                                    current_unit.unit.repositoryName || current_unit.unit.callsign }}</span><br />
+                                <b class="fw-medium">Type:</b> <span class="fw-light badge bg-success">File
+                                    Repository</span>
                             </div>
-                            
+
                             <div>
                                 <b class="fw-medium">coords:</b> {{ printCoords(current_unit.unit.lat,
                                 current_unit.unit.lon) }}
@@ -474,49 +512,68 @@
             <div class="video-container">
                 <div class="video-title">{{ currentVideo.title || 'Camera Stream' }}</div>
                 <div class="video-controls">
+                    <!-- Recording controls for standalone recording -->
+                    <div v-if="currentVideo.isStandaloneRecording" class="btn-group me-2">
+                        <button class="btn btn-sm btn-warning fw-medium" @click="stopStandaloneRecording()">
+                            <i class="bi bi-stop-circle"></i> Stop Recording
+                        </button>
+                    </div>
+
+                    <!-- Regular webcam controls -->
+                    <div v-else-if="currentVideo.isWebcam" class="btn-group me-2">
+                        <button v-if="!isRecording" class="btn btn-sm btn-success fw-medium" @click="startRecording()">
+                            <i class="bi bi-record-circle"></i> Record
+                        </button>
+                        <button v-if="isRecording" class="btn btn-sm btn-warning fw-medium" @click="stopRecording()">
+                            <i class="bi bi-stop-circle"></i> Stop Recording
+                        </button>
+                    </div>
+
                     <button class="btn btn-sm btn-danger fw-medium" @click="stopVideo()">
                         <i class="bi bi-x-circle"></i> Close
                     </button>
                 </div>
-                
+
                 <!-- Regular Video -->
-                <video v-if="!currentVideo.isWebcam && !currentVideo.isRTSP" 
-                       :src="currentVideo.url" 
-                       controls 
-                       autoplay 
-                       muted>
+                <video v-if="!currentVideo.isWebcam && !currentVideo.isRTSP" :src="currentVideo.url" controls autoplay
+                    muted>
                     Your browser does not support video playback.
                 </video>
-                
+
                 <!-- Webcam Video -->
-                <video v-if="currentVideo.isWebcam" 
-                       ref="webcamVideo"
-                       autoplay 
-                       muted
-                       playsinline>
+                <video v-if="currentVideo.isWebcam" ref="webcamVideo" autoplay muted playsinline>
                     Your browser does not support video playback.
                 </video>
-                
+
+                <!-- Recording indicator for standalone recording -->
+                <div v-if="currentVideo.isStandaloneRecording && standaloneRecording.isActive"
+                    class="recording-indicator">
+                    <i class="bi bi-record-circle text-danger"></i>
+                    <span class="text-white ms-1">RECORDING</span>
+                </div>
+
                 <!-- RTSP Info Display -->
                 <div v-if="currentVideo.isRTSP" class="rtsp-info">
                     <div class="text-center mb-4">
                         <i class="bi bi-camera-video" style="font-size: 3rem; color: #ffc107;"></i>
                         <h4 class="mt-3 mb-3">RTSP Stream</h4>
                     </div>
-                    
+
                     <div class="mb-4">
                         <div class="card bg-dark border-secondary">
                             <div class="card-body">
                                 <h6 class="card-title text-warning"><i class="bi bi-link-45deg"></i> Stream URL</h6>
-                                <p class="card-text font-monospace text-break" style="font-size: 0.9rem;">{{ currentVideo.url }}</p>
+                                <p class="card-text font-monospace text-break" style="font-size: 0.9rem;">{{
+                                    currentVideo.url }}</p>
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="alert alert-warning" role="alert">
                         <h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Browser Compatibility</h6>
-                        <p class="mb-3">RTSP streams cannot be played directly in web browsers due to protocol limitations.</p>
-                        
+                        <p class="mb-3">RTSP streams cannot be played directly in web browsers due to protocol
+                            limitations.</p>
+
                         <h6 class="mb-2"><i class="bi bi-gear"></i> Recommended Solutions:</h6>
                         <ul class="mb-0">
                             <li class="mb-1">Use <strong>MediaMTX</strong> to convert RTSP to WebRTC/HLS</li>
@@ -524,7 +581,7 @@
                             <li class="mb-1">Use dedicated <strong>IP camera viewing software</strong></li>
                         </ul>
                     </div>
-                    
+
                     <div class="text-center">
                         <button class="btn btn-outline-light fw-medium me-2" @click="copyToClipboard(currentVideo.url)">
                             <i class="bi bi-clipboard"></i> Copy RTSP URL
@@ -534,7 +591,7 @@
                         </button>
                     </div>
                 </div>
-                
+
                 <div class="video-info" v-if="!currentVideo.isRTSP">
                     <div v-if="currentVideo.isWebcam" class="text-center">
                         <i class="bi bi-camera-video"></i> Live webcam feed
@@ -550,7 +607,8 @@
         </div>
 
         <!-- File Repository Modal -->
-        <div v-if="currentFileRepository && currentFileRepository.visible" class="file-repository-modal" @click.self="closeFileRepository()">
+        <div v-if="currentFileRepository && currentFileRepository.visible" class="file-repository-modal"
+            @click.self="closeFileRepository()">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title fw-semibold">
@@ -558,7 +616,7 @@
                     </h5>
                     <button type="button" class="btn-close" @click="closeFileRepository()"></button>
                 </div>
-                
+
                 <div class="modal-body">
                     <!-- Upload Section -->
                     <div class="card mb-3">
@@ -567,37 +625,30 @@
                         </div>
                         <div class="card-body">
                             <div class="mb-3">
-                                <input type="file" 
-                                       multiple 
-                                       @change="handleFileSelection" 
-                                       class="form-control fw-regular"
-                                       accept="*/*">
+                                <input type="file" multiple @change="handleFileSelection"
+                                    class="form-control fw-regular" accept="*/*">
                                 <div class="form-text">Select multiple files to upload to this repository</div>
                             </div>
-                            
+
                             <div class="d-flex justify-content-between align-items-center">
                                 <div>
                                     <span v-if="selectedFiles" class="badge bg-info fw-medium">
                                         {{ selectedFiles.length }} file(s) selected
                                     </span>
                                 </div>
-                                <button class="btn btn-primary fw-medium" 
-                                        @click="uploadFilesToRepository()"
-                                        :disabled="!selectedFiles || selectedFiles.length === 0 || isUploading">
+                                <button class="btn btn-primary fw-medium" @click="uploadFilesToRepository()"
+                                    :disabled="!selectedFiles || selectedFiles.length === 0 || isUploading">
                                     <span v-if="isUploading" class="spinner-border spinner-border-sm me-2"></span>
                                     <i v-else class="bi bi-upload me-2"></i>
                                     {{ isUploading ? 'Uploading...' : 'Upload Files' }}
                                 </button>
                             </div>
-                            
+
                             <!-- Upload Progress -->
                             <div v-if="isUploading" class="mt-3">
                                 <div class="progress">
-                                    <div class="progress-bar" 
-                                         :style="{ width: uploadProgress + '%' }"
-                                         :aria-valuenow="uploadProgress" 
-                                         aria-valuemin="0" 
-                                         aria-valuemax="100">
+                                    <div class="progress-bar" :style="{ width: uploadProgress + '%' }"
+                                        :aria-valuenow="uploadProgress" aria-valuemin="0" aria-valuemax="100">
                                         {{ uploadProgress }}%
                                     </div>
                                 </div>
@@ -611,29 +662,27 @@
                             <span>
                                 <i class="bi bi-files"></i> Repository Files ({{ repositoryFiles.length }})
                             </span>
-                            <button class="btn btn-sm btn-outline-secondary fw-regular" 
-                                    @click="loadRepositoryFiles(currentFileRepository.uid)">
+                            <button class="btn btn-sm btn-outline-secondary fw-regular"
+                                @click="loadRepositoryFiles(currentFileRepository.uid)">
                                 <i class="bi bi-arrow-clockwise"></i> Refresh
                             </button>
                         </div>
                         <div class="card-body">
                             <div v-if="repositoryFiles.length === 0" class="text-center text-muted py-4">
                                 <i class="bi bi-folder2-open" style="font-size: 3rem;"></i>
-                                <p class="mt-2">No files in this repository yet.<br>Upload some files to get started!</p>
+                                <p class="mt-2">No files in this repository yet.<br>Upload some files to get started!
+                                </p>
                             </div>
-                            
+
                             <div v-else class="row g-3">
-                                <div v-for="file in repositoryFiles" 
-                                     :key="file.Hash" 
-                                     class="col-md-6 col-lg-4">
+                                <div v-for="file in repositoryFiles" :key="file.Hash" class="col-md-6 col-lg-4">
                                     <div class="card h-100 file-card">
                                         <div class="card-body d-flex flex-column">
                                             <div class="d-flex align-items-start mb-2">
-                                                <i class="bi me-2 text-primary" 
-                                                   :class="getFileIcon(file)" 
-                                                   style="font-size: 1.5rem;"></i>
+                                                <i class="bi me-2 text-primary" :class="getFileIcon(file)"
+                                                    style="font-size: 1.5rem;"></i>
                                                 <div class="flex-grow-1 min-w-0">
-                                                    <h6 class="card-title fw-medium text-truncate" 
+                                                    <h6 class="card-title fw-medium text-truncate"
                                                         :title="file.FileName.replace(/^[^_]*_/, '')">
                                                         {{ file.FileName.replace(/^[^_]*_/, '') }}
                                                     </h6>
@@ -645,22 +694,21 @@
                                                     </p>
                                                 </div>
                                             </div>
-                                            
+
                                             <div class="mt-auto">
                                                 <div class="btn-group btn-group-sm w-100">
-                                                    <button class="btn btn-outline-primary fw-regular" 
-                                                            @click="viewFile(file)"
-                                                            :title="file.MIMEType && (file.MIMEType.startsWith('video/') || file.MIMEType.startsWith('image/')) ? 'View' : 'Download'">
-                                                        <i class="bi" :class="file.MIMEType && file.MIMEType.startsWith('video/') ? 'bi-play-circle' : file.MIMEType && file.MIMEType.startsWith('image/') ? 'bi-eye' : 'bi-download'"></i>
+                                                    <button class="btn btn-outline-primary fw-regular"
+                                                        @click="viewFile(file)"
+                                                        :title="file.MIMEType && (file.MIMEType.startsWith('video/') || file.MIMEType.startsWith('image/')) ? 'View' : 'Download'">
+                                                        <i class="bi"
+                                                            :class="file.MIMEType && file.MIMEType.startsWith('video/') ? 'bi-play-circle' : file.MIMEType && file.MIMEType.startsWith('image/') ? 'bi-eye' : 'bi-download'"></i>
                                                     </button>
-                                                    <button class="btn btn-outline-secondary fw-regular" 
-                                                            @click="downloadFile(file)"
-                                                            title="Download">
+                                                    <button class="btn btn-outline-secondary fw-regular"
+                                                        @click="downloadFile(file)" title="Download">
                                                         <i class="bi bi-download"></i>
                                                     </button>
-                                                    <button class="btn btn-outline-danger fw-regular" 
-                                                            @click="deleteFile(file)"
-                                                            title="Delete">
+                                                    <button class="btn btn-outline-danger fw-regular"
+                                                        @click="deleteFile(file)" title="Delete">
                                                         <i class="bi bi-trash"></i>
                                                     </button>
                                                 </div>
@@ -672,7 +720,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary fw-regular" @click="closeFileRepository()">
                         Close Repository
@@ -801,20 +849,21 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <!-- Camera stream URL field for camera points -->
                             <div class="row m-2" v-if="form_unit.type === 'b-m-p-s-p-v'">
                                 <div class="col-12">
                                     <label for="ed-stream-url" class="form-label fw-medium">Stream URL</label>
-                                    <input type="text" class="form-control fw-regular" id="ed-stream-url" 
-                                           v-model="form_unit.streamUrl" 
-                                           placeholder="rtsp://example.com/stream or http://example.com/stream.m3u8">
+                                    <input type="text" class="form-control fw-regular" id="ed-stream-url"
+                                        v-model="form_unit.streamUrl"
+                                        placeholder="rtsp://example.com/stream or http://example.com/stream.m3u8">
                                     <div class="form-text">
-                                        Supported: RTSP, HLS (.m3u8), WebRTC, regular video URLs, or 'webcam://live-stream' for local camera
+                                        Supported: RTSP, HLS (.m3u8), WebRTC, regular video URLs, or
+                                        'webcam://live-stream' for local camera
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="row m-2">
                                 <div class="col-12">
                                     <label for="ed-remarks" class="fw-medium">Remarks</label>
@@ -841,34 +890,34 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    
+
     <!-- Leaflet -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    
+
     <!-- Vue.js -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    
+
     <!-- HLS.js for HLS stream support -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    
+
     <!-- Bootstrap Dropdown Fix -->
     <script>
         // Ensure dropdowns work properly
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             // Initialize all dropdowns manually if needed
             var dropdowns = document.querySelectorAll('.dropdown-toggle');
-            dropdowns.forEach(function(dropdown) {
-                dropdown.addEventListener('click', function(e) {
+            dropdowns.forEach(function (dropdown) {
+                dropdown.addEventListener('click', function (e) {
                     e.preventDefault();
                     var dropdownMenu = this.nextElementSibling;
                     var isOpen = dropdownMenu.classList.contains('show');
-                    
+
                     // Close all other dropdowns
-                    document.querySelectorAll('.dropdown-menu.show').forEach(function(menu) {
+                    document.querySelectorAll('.dropdown-menu.show').forEach(function (menu) {
                         menu.classList.remove('show');
                         menu.previousElementSibling.setAttribute('aria-expanded', 'false');
                     });
-                    
+
                     // Toggle current dropdown
                     if (!isOpen) {
                         dropdownMenu.classList.add('show');
@@ -879,11 +928,11 @@
                     }
                 });
             });
-            
+
             // Close dropdowns when clicking outside
-            document.addEventListener('click', function(e) {
+            document.addEventListener('click', function (e) {
                 if (!e.target.closest('.dropdown')) {
-                    document.querySelectorAll('.dropdown-menu.show').forEach(function(menu) {
+                    document.querySelectorAll('.dropdown-menu.show').forEach(function (menu) {
                         menu.classList.remove('show');
                         menu.previousElementSibling.setAttribute('aria-expanded', 'false');
                     });
@@ -891,16 +940,16 @@
             });
         });
     </script>
-    
+
     <!-- UUID generator -->
     <script>
         function uuidv4() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
                 var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
                 return v.toString(16);
             });
         }
-        
+
         // Icon functions
         function getIcon(unit, param) {
             const iconMap = {
@@ -910,23 +959,23 @@
                 'b-m-p-w': '/static/icons/water.png',
                 'b-m-p-s-p-op': '/static/icons/observation.png'
             };
-            
+
             return L.icon({
                 iconUrl: iconMap[unit.type] || '/static/icons/default.png',
                 iconSize: [24, 24],
                 iconAnchor: [12, 12]
             });
         }
-        
+
         function getIconUri(item, size, param) {
             return { uri: '/static/icons/default.png' };
         }
-        
+
         function getMilIconUri(item, size, param) {
             return { uri: '/static/icons/default.png' };
         }
     </script>
-    
+
     <!-- Your enhanced JavaScript code goes here -->
     <script>
         // Insert your enhanced JavaScript from the previous artifact here
