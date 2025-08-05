@@ -8,7 +8,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -233,27 +236,33 @@ func getUploadHandler(app *App) fiber.Handler {
 
 		if fname == "" {
 			app.logger.Error("no name: " + ctx.Request().URI().QueryArgs().String())
-
 			return ctx.Status(fiber.StatusNotAcceptable).SendString("no name")
 		}
 
-		switch ctx.Get(fiber.HeaderContentType) {
-		case "multipart/form-data":
+		// DEBUG: Log the content type we're receiving
+		contentType := ctx.Get(fiber.HeaderContentType)
+		app.logger.Info("upload request",
+			slog.String("filename", fname),
+			slog.String("content-type", contentType),
+			slog.String("method", ctx.Method()))
+
+		switch {
+		case strings.HasPrefix(contentType, "multipart/form-data"):
+			app.logger.Info("processing as multipart")
 			c, err := app.uploadMultipart(ctx, uid, "", fname, false)
 			if err != nil {
-				app.logger.Error("error", slog.Any("error", err))
+				app.logger.Error("multipart upload error", slog.Any("error", err))
 				return ctx.SendStatus(fiber.StatusNotAcceptable)
 			}
-
 			return ctx.SendString(resourceUrl(ctx.BaseURL(), c))
 
 		default:
+			app.logger.Info("processing as raw file", slog.String("content-type", contentType))
 			c, err := app.uploadFile(ctx, uid, fname)
 			if err != nil {
-				app.logger.Error("error", slog.Any("error", err))
+				app.logger.Error("raw upload error", slog.Any("error", err))
 				return ctx.SendStatus(fiber.StatusNotAcceptable)
 			}
-
 			return ctx.SendString(resourceUrl(ctx.BaseURL(), c))
 		}
 	}
@@ -264,21 +273,85 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 	user := app.users.Get(username)
 
 	fh, err := ctx.FormFile("assetfile")
-
 	if err != nil {
-		app.logger.Error("error", slog.Any("error", err))
+		app.logger.Error("error getting form file", slog.Any("error", err))
 		return nil, err
 	}
 
+	// Check if this is a video file that should go to tools/videos
+	isVideoForTools := strings.Contains(filename, "webcam-recording")
+
+	if isVideoForTools {
+		app.logger.Info("processing video for tools/videos", slog.String("filename", filename))
+
+		// Save to tools/videos directory - THIS IS THE KEY PART
+		videosDir := "tools/videos"
+		if err := os.MkdirAll(videosDir, 0755); err != nil {
+			app.logger.Error("failed to create videos directory", slog.Any("error", err))
+			return nil, err
+		}
+
+		// Clean filename (remove any path separators)
+		cleanFilename := filepath.Base(filename)
+		videoPath := filepath.Join(videosDir, cleanFilename)
+
+		// Open the uploaded file
+		f, err := fh.Open()
+		if err != nil {
+			app.logger.Error("failed to open uploaded file", slog.Any("error", err))
+			return nil, err
+		}
+		defer f.Close()
+
+		// Create the destination file in tools/videos
+		outFile, err := os.Create(videoPath)
+		if err != nil {
+			app.logger.Error("failed to create video file", slog.Any("error", err))
+			return nil, err
+		}
+		defer outFile.Close()
+
+		// Copy the uploaded file to tools/videos
+		copied, err := io.Copy(outFile, f)
+		if err != nil {
+			app.logger.Error("failed to copy video file", slog.Any("error", err))
+			return nil, err
+		}
+
+		app.logger.Info("video saved to tools/videos",
+			slog.String("filename", cleanFilename),
+			slog.String("path", videoPath),
+			slog.Int64("bytes", copied))
+
+		// Create a simple resource record
+		c := &model.Resource{
+			Scope:          user.GetScope(),
+			Hash:           "tools-video-" + cleanFilename,
+			UID:            uid,
+			Name:           filename,
+			FileName:       cleanFilename,
+			MIMEType:       "video/webm",
+			Size:           int(fh.Size),
+			SubmissionUser: user.GetLogin(),
+			CreatorUID:     queryIgnoreCase(ctx, "creatorUid"),
+			Tool:           "webcam-recorder",
+			Keywords:       "tools,video,webcam-recording",
+			Expiration:     -1,
+		}
+
+		err = app.dbm.Create(c)
+		return c, err
+	}
+
+	// Regular file upload logic (existing code)
 	f, err := fh.Open()
-
 	if err != nil {
-		app.logger.Error("error", slog.Any("error", err))
+		app.logger.Error("error opening file", slog.Any("error", err))
 		return nil, err
 	}
+	defer f.Close()
 
 	hash1, _, err := app.files.PutFile(user.GetScope(), hash, f)
-
 	if err != nil {
 		app.logger.Error("save file error", slog.Any("error", err))
 		return nil, err
@@ -310,7 +383,6 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 	}
 
 	err = app.dbm.Create(c)
-
 	return c, err
 }
 

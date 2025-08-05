@@ -1010,25 +1010,32 @@ const app = Vue.createApp({
             const filename = `webcam-recording-${timestamp}.webm`;
 
             try {
-                // Upload to tools/videos directory
+                console.log('Uploading standalone recording:', filename, 'Size:', blob.size);
+                
                 const formData = new FormData();
-                formData.append('video', blob, filename);
+                formData.append('assetfile', blob, filename);
 
-                const response = await fetch('/api/videos/upload', {
+                // CRITICAL: Make sure browser detects this as multipart/form-data
+                const response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(filename)}`, {
                     method: 'POST',
                     body: formData
+                    // DO NOT set Content-Type header - browser must set it automatically with boundary
                 });
 
                 if (response.ok) {
-                    alert(`Recording saved successfully as ${filename}`);
+                    const result = await response.text();
+                    console.log('Recording saved successfully to tools/videos:', result);
+                    alert(`Recording saved successfully as ${filename}\n\nSaved to: tools/videos/${filename}`);
                 } else {
-                    // Fallback: download to user's computer
-                    this.downloadRecording(blob, filename);
+                    const errorText = await response.text();
+                    console.error('Upload failed:', response.status, errorText);
+                    throw new Error(`Upload failed: ${response.status} - ${errorText}`);
                 }
             } catch (error) {
                 console.error('Upload failed:', error);
                 // Fallback: download to user's computer
                 this.downloadRecording(blob, filename);
+                alert('Upload to server failed, video downloaded to your computer instead.');
             }
         },
 

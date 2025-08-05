@@ -3,7 +3,9 @@ package main
 import (
 	"embed"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"runtime/pprof"
 	"time"
 
@@ -51,6 +53,9 @@ func NewHttp(app *App) *fiber.App {
 	// Add Marti API routes
 	srv.All("/Marti/*", getMartiProxyHandler(app))
 	srv.All("/api/*", getMartiProxyHandler(app))
+
+	// Add this route to your webclient router
+	srv.Post("/api/videos/upload", app.uploadVideoToToolsHandler)
 
 	return srv
 }
@@ -321,4 +326,47 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		ctx.Status(resp.StatusCode())
 		return ctx.Send(resp.Body())
 	}
+}
+
+func (app *App) uploadVideoToToolsHandler(c *fiber.Ctx) error {
+	// Get the uploaded file
+	file, err := c.FormFile("video")
+	if err != nil {
+		app.logger.Error("no video file uploaded", slog.Any("error", err))
+		return c.Status(fiber.StatusBadRequest).SendString("No video file uploaded")
+	}
+
+	// Create the tools/videos directory if it doesn't exist
+	videosDir := "tools/videos"
+	if err := os.MkdirAll(videosDir, 0755); err != nil {
+		app.logger.Error("failed to create videos directory", slog.Any("error", err))
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to create videos directory")
+	}
+
+	// Use the filename from the request
+	filename := c.FormValue("filename")
+	if filename == "" {
+		filename = file.Filename
+		if filename == "" {
+			// Generate a timestamp-based filename if none provided
+			timestamp := time.Now().Format("2006-01-02_15-04-05")
+			filename = fmt.Sprintf("webcam-recording-%s.webm", timestamp)
+		}
+	}
+
+	filepath := fmt.Sprintf("%s/%s", videosDir, filename)
+
+	// Save the file directly to tools/videos
+	if err := c.SaveFile(file, filepath); err != nil {
+		app.logger.Error("failed to save video file", slog.Any("error", err))
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to save video file")
+	}
+
+	app.logger.Info("video saved to tools/videos", slog.String("filename", filename), slog.String("path", filepath))
+	return c.JSON(fiber.Map{
+		"success":  true,
+		"filename": filename,
+		"path":     filepath,
+		"message":  fmt.Sprintf("Video saved to %s", filepath),
+	})
 }
