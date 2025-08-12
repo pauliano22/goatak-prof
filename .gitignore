@@ -1,13 +1,118 @@
+# Binaries and build artifacts
 .idea/
 dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+goatak_server
+goatak_client
+webclient
+takproxy
+takreplay
+mm
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories (if using vendoring)
+vendor/
+
+# Runtime data directories
+/data/
+!/data/.gitkeep
+
+# Log files
 *.log
 *.tmp
-*.out
-test-*.yml
+/logs/
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Configuration files with sensitive data
+*.yml.local
+*.yaml.local
+config.local.*
+users.yml
+
+# Certificate and key files
 *.csr
 *.srl
 *.pem
 *.key
 *.p12
-*.sqlite
+*.crt
+*.jks
+!/cert/*.sh
+!/cert/README.md
+
+# Testing files
+test-*.yml
 report.xml
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker files (optional)
+docker-compose.override.yml
+.env
+.env.local
+
+# Release artifacts
+*.tar.gz
+*.zip
+releases/
+
+# Coverage reports
+coverage.html
+coverage.out
+
+# Crash logs
+crash.log
+
+# Node modules (if using any frontend build tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python cache (if using any Python tools)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local testing files and demo videos
+test-*
+*.test.yml
+/tools/videos/*.webm
+/tools/videos/*.mp4
+
+# Backup files
+*.bak
+*.backup
