@@ -228,6 +228,7 @@ const app = Vue.createApp({
             }
         },
 
+        // Updated processUnit function - extracts stream info for all clients
         processUnit: function (u) {
             if (!u) return;
             let unit = this.units.get(u.uid);
@@ -239,12 +240,58 @@ const app = Vue.createApp({
                 unit.update(u)
             }
 
+            // CRITICAL FIX: Extract stream info for camera points on ALL clients
+            if (u.type === "b-m-p-s-p-v" && u.text) {
+                try {
+                    const streamInfo = JSON.parse(u.text);
+                    if (streamInfo.streamUrl) {
+                        // Reconstruct camera properties from transmitted data
+                        u.isCamera = true;
+                        u.streamUrl = streamInfo.streamUrl;
+                        u.streamType = streamInfo.streamType || this.detectStreamType(streamInfo.streamUrl);
+                        console.log('Camera stream info extracted:', {
+                            callsign: u.callsign,
+                            streamUrl: u.streamUrl,
+                            streamType: u.streamType
+                        });
+                    }
+                } catch (e) {
+                    // Fallback: if text isn't JSON but type is camera, mark as camera
+                    console.log('Camera point detected but no valid stream info:', u.callsign);
+                    if (u.type === "b-m-p-s-p-v") {
+                        u.isCamera = true;
+                        // Could extract URL from plain text as fallback
+                        const urlMatch = u.text.match(/(https?:\/\/[^\s]+|rtsp:\/\/[^\s]+)/);
+                        if (urlMatch) {
+                            u.streamUrl = urlMatch[0];
+                            u.streamType = this.detectStreamType(u.streamUrl);
+                        }
+                    }
+                }
+            }
+
+            // Also handle file repository points similarly
+            if (u.type === "b-m-p-s-p-f" && u.text) {
+                try {
+                    const repoInfo = JSON.parse(u.text);
+                    if (repoInfo.repositoryName) {
+                        u.isFileRepository = true;
+                        u.repositoryName = repoInfo.repositoryName;
+                    }
+                } catch (e) {
+                    // Fallback for file repository
+                    if (u.type === "b-m-p-s-p-f") {
+                        u.isFileRepository = true;
+                        u.repositoryName = u.callsign;
+                    }
+                }
+            }
+
             if (this.locked_unit_uid === unit.uid) {
                 map.setView(unit.coords());
             }
 
             this.ts++;
-
             return unit;
         },
 
@@ -495,7 +542,54 @@ const app = Vue.createApp({
             this.setCurrentUnitUid(u.uid, true);
         },
 
-        // NEW FILE REPOSITORY METHODS
+        showCameraStream: function (unit) {
+            if (!unit.unit.isCamera && unit.unit.type !== "b-m-p-s-p-v") {
+                console.log('Not a camera unit:', unit.unit);
+                return;
+            }
+
+            console.log('Opening camera stream for:', unit.unit.callsign);
+            console.log('Stream URL:', unit.unit.streamUrl);
+
+            const streamUrl = unit.unit.streamUrl;
+
+            if (!streamUrl) {
+                console.error('No stream URL found for camera unit');
+                alert('No stream URL configured for this camera');
+                return;
+            }
+
+            // Determine stream type
+            let streamType = 'video';
+            if (streamUrl.includes(':9001/')) streamType = 'webrtc';
+            else if (streamUrl.includes('.m3u8')) streamType = 'hls';
+            else if (streamUrl.startsWith('rtsp://')) streamType = 'rtsp';
+
+            // Set up currentVideo
+            this.currentVideo = {
+                url: streamUrl,
+                visible: true,
+                isLive: true,
+                isWebRTC: streamType === 'webrtc',
+                isHLS: streamType === 'hls',
+                isRTSP: streamType === 'rtsp',
+                title: unit.unit.callsign
+            };
+
+            console.log('Camera stream opened:', streamUrl, 'Type:', streamType);
+
+            // Handle WebRTC streams (your MediaMTX server)
+            if (streamType === 'webrtc') {
+                this.$nextTick(() => {
+                    this.handleWebRTCStream(unit, streamUrl);
+                });
+            } else if (streamType === 'hls') {
+                this.$nextTick(() => {
+                    this.handleHLSStream(unit, streamUrl);
+                });
+            }
+        },
+
         async addFileRepositoryPoint(latlng) {
             const repoName = prompt("Enter file repository name:", "Files");
             if (!repoName) {
@@ -522,12 +616,19 @@ const app = Vue.createApp({
                 speed: 0,
                 course: 0,
                 status: "",
-                text: "File repository: " + repoName,
+                // Store repository info in standard text field as JSON
+                text: JSON.stringify({
+                    description: "File repository",
+                    repositoryName: repoName,
+                    created: new Date().toISOString()
+                }),
                 parent_uid: "",
                 parent_callsign: "",
                 color: "#28a745",
                 send: true,
                 local: true,
+
+                // Keep these for local client:
                 isFileRepository: true,
                 repositoryName: repoName
             }
@@ -793,8 +894,8 @@ const app = Vue.createApp({
 
             return 'bi-file-earmark';
         },
-        async addCameraPoint(latlng) {
-            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "rtsp://example.com/stream");
+        addCameraPoint: function (latlng) {
+            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://localhost:9001/webcam");
             if (!streamUrl) {
                 return; // User cancelled
             }
@@ -804,26 +905,32 @@ const app = Vue.createApp({
             let stale = new Date(now);
             stale.setDate(stale.getDate() + 365);
 
-            // Detect stream type based on URL
-            const streamType = this.detectStreamType(streamUrl);
-            const streamName = "Camera";
+            // Simple stream type detection
+            let streamType = 'video';
+            if (streamUrl.toLowerCase().startsWith('rtsp://')) streamType = 'rtsp';
+            else if (streamUrl.includes('.m3u8')) streamType = 'hls';
+            else if (streamUrl.includes(':9001/')) streamType = 'webrtc';
 
             let u = {
                 uid: uid,
                 category: "point",
-                callsign: streamName + "-" + this.point_num++,
+                callsign: "Camera-" + this.point_num++,
                 sidc: "",
                 start_time: now,
                 last_seen: now,
                 stale_time: stale,
-                type: "b-m-p-s-p-v", // CoT Camera Feed type
+                type: "b-m-p-s-p-v",
                 lat: latlng.lat,
                 lon: latlng.lng,
                 hae: 0,
                 speed: 0,
                 course: 0,
                 status: "",
-                text: "Camera feed: " + streamUrl,
+                text: JSON.stringify({
+                    description: "Camera feed",
+                    streamUrl: streamUrl,
+                    streamType: streamType
+                }),
                 parent_uid: "",
                 parent_callsign: "",
                 color: "#0066cc",
@@ -844,68 +951,6 @@ const app = Vue.createApp({
             unit.post();
 
             this.setCurrentUnitUid(u.uid, true);
-        },
-
-        detectStreamType(streamUrl) {
-            if (streamUrl.toLowerCase().startsWith('rtsp://')) return 'rtsp';
-            if (streamUrl.includes('.m3u8')) return 'hls';
-            if (streamUrl.includes(':9001/')) return 'webrtc';
-            if (streamUrl === 'webcam://live-stream') return 'webcam';
-            return 'video';
-        },
-
-        showCameraStream(unit) {
-            if (!unit.unit.isCamera && unit.unit.type !== "b-m-p-s-p-v") {
-                console.log('Not a camera unit:', unit.unit);
-                return;
-            }
-
-            console.log('Opening camera stream for:', unit.unit.callsign);
-            console.log('Stream URL:', unit.unit.streamUrl);
-            console.log('Stream Type:', unit.unit.streamType);
-
-            const streamUrl = unit.unit.streamUrl;
-            const streamType = unit.unit.streamType || this.detectStreamType(streamUrl);
-
-            if (!streamUrl) {
-                console.error('No stream URL found for camera unit');
-                alert('No stream URL configured for this camera');
-                return;
-            }
-
-            // Set up currentVideo
-            this.currentVideo = {
-                url: streamUrl,
-                visible: true,
-                isLive: streamType === 'webrtc' || streamType === 'hls' || streamType === 'rtsp',
-                isWebcam: streamType === 'webcam',
-                isWebRTC: streamType === 'webrtc',
-                isHLS: streamType === 'hls',
-                isRTSP: streamType === 'rtsp',
-                title: unit.unit.callsign
-            };
-
-            // Handle different stream types
-            if (streamType === 'rtsp') {
-                this.handleRTSPStream(unit, streamUrl);
-            } else if (streamType === 'webcam') {
-                this.handleWebcamStream(unit);
-            } else if (streamType === 'webrtc') {
-                this.handleWebRTCStream(unit, streamUrl);
-            } else if (streamType === 'hls') {
-                this.handleHLSStream(unit, streamUrl);
-            } else {
-                this.handleRegularVideo(unit, streamUrl);
-            }
-        },
-
-        handleRTSPStream(unit, streamUrl) {
-            console.log('RTSP stream detected');
-            alert(`RTSP Stream: ${streamUrl}\n\nNote: RTSP streams cannot be played directly in browsers. Consider using:\n- MediaMTX to convert to WebRTC/HLS\n- VLC Web Plugin\n- A streaming server that converts RTSP to browser-compatible formats`);
-
-            // You could implement WebRTC conversion here or redirect to an external player
-            // For now, we'll just display the RTSP URL
-            this.currentVideo.isRTSP = true;
         },
 
         async handleWebcamStream(unit) {
@@ -1011,7 +1056,7 @@ const app = Vue.createApp({
 
             try {
                 console.log('Uploading standalone recording:', filename, 'Size:', blob.size);
-                
+
                 const formData = new FormData();
                 formData.append('assetfile', blob, filename);
 
@@ -1151,6 +1196,8 @@ const app = Vue.createApp({
                 throw new Error('Video element not found');
             }
 
+            console.log('Setting up WebRTC for video element:', videoElement);
+
             // Clean up existing connection
             if (this.webrtcPeerConnection) {
                 this.webrtcPeerConnection.close();
@@ -1169,8 +1216,14 @@ const app = Vue.createApp({
             const offer = await this.webrtcPeerConnection.createOffer();
             await this.webrtcPeerConnection.setLocalDescription(offer);
 
-            // Try WebRTC connection
-            const response = await fetch(streamUrl + '/whep', {
+            // FIX: Clean up URL and build WHEP endpoint properly
+            const cleanUrl = streamUrl.replace(/\/$/, ''); // Remove trailing slash
+            const whepUrl = cleanUrl + '/whep';
+
+            console.log('Connecting to WHEP endpoint:', whepUrl);
+
+            // Connect to MediaMTX WebRTC endpoint
+            const response = await fetch(whepUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/sdp' },
                 body: offer.sdp
@@ -1182,8 +1235,11 @@ const app = Vue.createApp({
                     type: 'answer',
                     sdp: answerSdp
                 });
+                console.log('WebRTC connection established');
             } else {
-                throw new Error(`WebRTC connection failed: ${response.status}`);
+                const errorText = await response.text();
+                console.error('WHEP response:', response.status, errorText);
+                throw new Error(`WebRTC connection failed: ${response.status} - ${errorText}`);
             }
         },
 
