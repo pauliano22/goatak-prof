@@ -719,11 +719,12 @@ const app = Vue.createApp({
                     // Create a new file with the modified name
                     const renamedFile = new File([file], modifiedFileName, { type: file.type });
                     
-                    // Use 'assetfile' as the primary field name (what your server expects)
-                    formData.append('assetfile', renamedFile);
-                    
-                    // Also try 'file' as backup
+                    // Try 'file' as the field name (most common) - THIS WAS YOUR WORKING VERSION
                     formData.append('file', renamedFile);
+                    
+                    // Also try adding the file with its name as the field name
+                    // Some backends expect this format
+                    formData.append(modifiedFileName, renamedFile);
                     
                     // Add keywords to associate with repository
                     formData.append('keywords', repositoryUid);
@@ -743,7 +744,7 @@ const app = Vue.createApp({
                     if (!response.ok && response.status === 406) {
                         // Create new FormData for second attempt
                         const formData2 = new FormData();
-                        formData2.append('assetfile', renamedFile);
+                        formData2.append('file', renamedFile);
                         
                         response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
                             method: 'POST',
