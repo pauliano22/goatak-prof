@@ -49,3 +49,10 @@ ssl:
   key: cert/files/server-chain.key
   # enrolled cert ttl in days (default is 365)
   cert_ttl_days: 365
+
+  # Add this section to enable CORS for the Marti API
+cors:
+  enabled: true
+  allowed_origins: ["*"]
+  allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  allowed_headers: ["Content-Type", "Authorization"]
