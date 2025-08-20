@@ -713,40 +713,52 @@ const app = Vue.createApp({
                 try {
                     // Add repository UID to filename to associate with this repository
                     const modifiedFileName = `${repositoryUid}_${file.name}`;
-
+                    
                     const formData = new FormData();
+                    
+                    // Create a new file with the modified name
                     const renamedFile = new File([file], modifiedFileName, { type: file.type });
+                    
+                    // Use 'assetfile' as the primary field name (what your server expects)
+                    formData.append('assetfile', renamedFile);
+                    
+                    // Also try 'file' as backup
                     formData.append('file', renamedFile);
-                    formData.append('assetFile', renamedFile);
+                    
+                    // Add keywords to associate with repository
                     formData.append('keywords', repositoryUid);
+                    
+                    // Some backends expect additional metadata
                     formData.append('filename', modifiedFileName);
                     formData.append('name', modifiedFileName);
 
-                    // First attempt - no query parameter
+                    // Try without the query parameter first
                     let response = await fetch('/Marti/sync/upload', {
                         method: 'POST',
                         body: formData
+                        // Don't set Content-Type header - let browser set it with boundary
                     });
 
-                    // Second attempt with name parameter
+                    // If that fails, try with the name parameter
                     if (!response.ok && response.status === 406) {
+                        // Create new FormData for second attempt
                         const formData2 = new FormData();
-                        formData2.append('file', renamedFile);
-
+                        formData2.append('assetfile', renamedFile);
+                        
                         response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
                             method: 'POST',
                             body: formData2
                         });
                     }
 
-                    // Third attempt with raw file
+                    // If still failing, try raw file upload
                     if (!response.ok && response.status === 406) {
                         response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
                             method: 'POST',
                             headers: {
                                 'Content-Type': file.type || 'application/octet-stream',
                             },
-                            body: file
+                            body: file // Send raw file data
                         });
                     }
 
