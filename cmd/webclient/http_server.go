@@ -13,6 +13,7 @@ import (
 	"github.com/kdudkov/goatak/pkg/log"
 	"github.com/kdudkov/goatak/staticfiles"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/template/html/v2"
@@ -285,12 +286,15 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		path := ctx.Path()
 		method := ctx.Method()
 
-		// Build URL with port 8080 for Marti API
-		host := "147.177.46.185:8080" // Hardcode Marti API host:port
+		// HARDCODE your remote server for the proxy
+		host := "147.177.46.185:8080"
 		url := fmt.Sprintf("http://%s%s", host, path)
 
-		// Create the request
-		req := app.remoteAPI.request(path)
+		// Create request using resty directly instead of app.remoteAPI
+		client := resty.New()
+		client.SetTimeout(30 * time.Second)
+
+		req := client.R()
 
 		// Copy headers
 		for key, values := range ctx.GetReqHeaders() {
@@ -309,8 +313,8 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 			req.SetQueryParam(key, value)
 		}
 
-		// Execute request with hardcoded URL
-		resp, err := req.SetContext(ctx.Context()).Execute(method, url)
+		// Execute request directly to your server
+		resp, err := req.Execute(method, url)
 		if err != nil {
 			app.logger.Warn("Failed to proxy request", "error", err, "path", path, "url", url)
 			return ctx.SendStatus(fiber.StatusBadGateway)
