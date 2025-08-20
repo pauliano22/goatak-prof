@@ -667,7 +667,7 @@ const app = Vue.createApp({
 
         async loadRepositoryFiles(repositoryUid) {
             try {
-                const response = await fetch('/Marti/sync/search');
+                const response = await fetch('http://147.177.46.185/Marti/sync/search');
                 if (!response.ok) {
                     console.log('Cannot fetch from Marti API, status:', response.status);
                     this.repositoryFiles = [];
@@ -678,9 +678,7 @@ const app = Vue.createApp({
                 const allFiles = data.results || [];
 
                 // Filter files that belong to this repository
-                // We'll use a naming convention or metadata to associate files with repositories
                 this.repositoryFiles = allFiles.filter(file => {
-                    // Check if file name contains repository UID or use keywords
                     return file.Keywords && file.Keywords.includes(repositoryUid) ||
                         file.FileName && file.FileName.includes(repositoryUid);
                 });
@@ -736,10 +734,9 @@ const app = Vue.createApp({
                     formData.append('name', modifiedFileName);
 
                     // Try without the query parameter first
-                    let response = await fetch('/Marti/sync/upload', {
+                    const response = await fetch('http://147.177.46.185/Marti/sync/upload', {
                         method: 'POST',
                         body: formData
-                        // Don't set Content-Type header - let browser set it with boundary
                     });
 
                     // If that fails, try with the name parameter
@@ -748,7 +745,7 @@ const app = Vue.createApp({
                         const formData2 = new FormData();
                         formData2.append('file', renamedFile);
 
-                        response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
+                        response = await fetch('http://147.177.46.185/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
                             method: 'POST',
                             body: formData2
                         });
@@ -756,7 +753,7 @@ const app = Vue.createApp({
 
                     // If still failing, try raw file upload
                     if (!response.ok && response.status === 406) {
-                        response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
+                        response = await fetch('http://147.177.46.185/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
                             method: 'POST',
                             headers: {
                                 'Content-Type': file.type || 'application/octet-stream',
@@ -804,7 +801,7 @@ const app = Vue.createApp({
 
         async downloadFile(file) {
             try {
-                const downloadUrl = `/Marti/sync/content?hash=${file.Hash}`;
+                const downloadUrl = `http://147.177.46.185/Marti/sync/content?hash=${file.Hash}`;
 
                 // Create temporary link and trigger download
                 const link = document.createElement('a');
@@ -822,7 +819,7 @@ const app = Vue.createApp({
         async viewFile(file) {
             if (file.MIMEType && file.MIMEType.startsWith('video/')) {
                 // Open video in existing video overlay
-                const videoUrl = `/Marti/sync/content?hash=${file.Hash}`;
+                const videoUrl = `http://147.177.46.185/Marti/sync/content?hash=${file.Hash}`;
                 this.currentVideo = {
                     url: videoUrl,
                     visible: true,
@@ -833,7 +830,7 @@ const app = Vue.createApp({
                 this.currentFileRepository.visible = false;
             } else if (file.MIMEType && file.MIMEType.startsWith('image/')) {
                 // Open image in new tab/window
-                const imageUrl = `/Marti/sync/content?hash=${file.Hash}`;
+                const imageUrl = `http://147.177.46.185/Marti/sync/content?hash=${file.Hash}`;
                 window.open(imageUrl, '_blank');
             } else {
                 // Download other file types
@@ -848,7 +845,7 @@ const app = Vue.createApp({
 
             try {
                 // Note: Marti API might not have delete endpoint, this is a placeholder
-                const response = await fetch(`/Marti/sync/delete?hash=${file.Hash}`, {
+                const response = await fetch(`http://147.177.46.185/Marti/sync/delete?hash=${file.Hash}`, {
                     method: 'DELETE'
                 });
 
@@ -1061,7 +1058,7 @@ const app = Vue.createApp({
                 formData.append('assetfile', blob, filename);
 
                 // CRITICAL: Make sure browser detects this as multipart/form-data
-                const response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(filename)}`, {
+                const response = await fetch(`http://147.177.46.185/Marti/sync/upload?name=${encodeURIComponent(filename)}`, {
                     method: 'POST',
                     body: formData
                     // DO NOT set Content-Type header - browser must set it automatically with boundary
@@ -1161,7 +1158,7 @@ const app = Vue.createApp({
                 formData.append('keywords', this.currentFileRepository.uid);
                 formData.append('filename', filename);
 
-                const response = await fetch('/Marti/sync/upload', {
+                const response = await fetch('http://147.177.46.185/Marti/sync/upload', {
                     method: 'POST',
                     body: formData
                 });
