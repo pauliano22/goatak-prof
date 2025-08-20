@@ -286,11 +286,19 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		path := ctx.Path()
 		method := ctx.Method()
 
+		// DEBUG: Log all proxy requests
+		app.logger.Info("PROXY REQUEST",
+			"path", path,
+			"method", method,
+			"headers", ctx.GetReqHeaders())
+
 		// HARDCODE your remote server for the proxy
 		host := "147.177.46.185:8080"
 		url := fmt.Sprintf("http://%s%s", host, path)
 
-		// Create request using resty directly instead of app.remoteAPI
+		app.logger.Info("PROXY FORWARDING", "from", path, "to", url)
+
+		// Create request using resty directly
 		client := resty.New()
 		client.SetTimeout(30 * time.Second)
 
@@ -306,6 +314,7 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		// Copy body for POST/PUT requests
 		if method == "POST" || method == "PUT" {
 			req.SetBody(ctx.Body())
+			app.logger.Info("PROXY BODY", "size", len(ctx.Body()))
 		}
 
 		// Copy query parameters
@@ -313,12 +322,14 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 			req.SetQueryParam(key, value)
 		}
 
-		// Execute request directly to your server
+		// Execute request
 		resp, err := req.Execute(method, url)
 		if err != nil {
-			app.logger.Warn("Failed to proxy request", "error", err, "path", path, "url", url)
+			app.logger.Error("PROXY ERROR", "error", err, "url", url)
 			return ctx.SendStatus(fiber.StatusBadGateway)
 		}
+
+		app.logger.Info("PROXY RESPONSE", "status", resp.StatusCode(), "url", url)
 
 		// Copy response headers
 		for key, values := range resp.Header() {
