@@ -715,33 +715,21 @@ const app = Vue.createApp({
                     const modifiedFileName = `${repositoryUid}_${file.name}`;
 
                     const formData = new FormData();
-
-                    // Create a new file with the modified name
                     const renamedFile = new File([file], modifiedFileName, { type: file.type });
-
-                    // Try 'file' as the field name (most common)
+                    formData.append('file', renamedFile);
                     formData.append('assetFile', renamedFile);
-
-                    // Also try adding the file with its name as the field name
-                    // Some backends expect this format
-                    formData.append(modifiedFileName, renamedFile);
-
-                    // Add keywords to associate with repository
                     formData.append('keywords', repositoryUid);
-
-                    // Some backends expect additional metadata
                     formData.append('filename', modifiedFileName);
                     formData.append('name', modifiedFileName);
 
-                    // Try without the query parameter first
-                    const response = await fetch('/Marti/sync/upload', {
+                    // First attempt - no query parameter
+                    let response = await fetch('/Marti/sync/upload', {
                         method: 'POST',
                         body: formData
                     });
 
-                    // If that fails, try with the name parameter
+                    // Second attempt with name parameter
                     if (!response.ok && response.status === 406) {
-                        // Create new FormData for second attempt
                         const formData2 = new FormData();
                         formData2.append('file', renamedFile);
 
@@ -751,14 +739,14 @@ const app = Vue.createApp({
                         });
                     }
 
-                    // If still failing, try raw file upload
+                    // Third attempt with raw file
                     if (!response.ok && response.status === 406) {
                         response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
                             method: 'POST',
                             headers: {
                                 'Content-Type': file.type || 'application/octet-stream',
                             },
-                            body: file // Send raw file data
+                            body: file
                         });
                     }
 
