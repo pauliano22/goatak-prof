@@ -118,7 +118,8 @@ func NewApp(uid string, callsign string, connectStr string, webPort int) *App {
 }
 
 func (app *App) Init() {
-	app.remoteAPI = NewRemoteAPI(app.host, app.logger.With("147.177.46.185", "api"))
+	// CRITICAL: Set the remote API host to your server IP
+	app.remoteAPI = NewRemoteAPI("147.177.46.185", app.logger.With("logger", "api"))
 
 	if app.tls {
 		app.remoteAPI.SetTLS(app.getTLSConfig(app.tlsStrict))
