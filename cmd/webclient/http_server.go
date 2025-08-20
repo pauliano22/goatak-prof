@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"runtime/pprof"
+	"strings"
 	"time"
 
 	"github.com/kdudkov/goatak/internal/wshandler"
@@ -286,26 +290,32 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		path := ctx.Path()
 		method := ctx.Method()
 
-		// DEBUG: Log all proxy requests
-		app.logger.Info("PROXY REQUEST",
-			"path", path,
-			"method", method,
-			"headers", ctx.GetReqHeaders())
-
-		// HARDCODE your remote server for the proxy
+		// Your remote server
 		host := "147.177.46.185:8080"
 		url := fmt.Sprintf("http://%s%s", host, path)
 
-		app.logger.Info("PROXY FORWARDING", "from", path, "to", url)
+		app.logger.Info("PROXY REQUEST",
+			"path", path,
+			"method", method,
+			"query", ctx.Request().URI().QueryString())
 
-		// Create request using resty directly
+		// Handle file uploads specially
+		if strings.Contains(path, "/Marti/sync/upload") {
+			return handleFileUploadProxy(app, ctx, url)
+		}
+
+		// Create request using resty
 		client := resty.New()
 		client.SetTimeout(30 * time.Second)
 
 		req := client.R()
 
-		// Copy headers
+		// Copy headers EXCEPT Content-Type for multipart
 		for key, values := range ctx.GetReqHeaders() {
+			// Skip content-length as resty will set it
+			if strings.ToLower(key) == "content-length" {
+				continue
+			}
 			for _, value := range values {
 				req.SetHeader(key, value)
 			}
@@ -314,13 +324,12 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		// Copy body for POST/PUT requests
 		if method == "POST" || method == "PUT" {
 			req.SetBody(ctx.Body())
-			app.logger.Info("PROXY BODY", "size", len(ctx.Body()))
 		}
 
 		// Copy query parameters
-		for key, value := range ctx.Queries() {
-			req.SetQueryParam(key, value)
-		}
+		ctx.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
+			req.SetQueryParam(string(key), string(value))
+		})
 
 		// Execute request
 		resp, err := req.Execute(method, url)
@@ -341,6 +350,123 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		ctx.Status(resp.StatusCode())
 		return ctx.Send(resp.Body())
 	}
+}
+
+func handleFileUploadProxy(app *App, ctx *fiber.Ctx, targetURL string) error {
+	// Parse multipart form
+	form, err := ctx.MultipartForm()
+	if err != nil {
+		// If not multipart, try raw body upload
+		app.logger.Info("Not multipart, trying raw body upload")
+
+		client := resty.New()
+		client.SetTimeout(30 * time.Second)
+
+		req := client.R()
+
+		// Copy headers
+		for key, values := range ctx.GetReqHeaders() {
+			if strings.ToLower(key) != "content-length" {
+				for _, value := range values {
+					req.SetHeader(key, value)
+				}
+			}
+		}
+
+		// Set body
+		req.SetBody(ctx.Body())
+
+		// Copy query params
+		ctx.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
+			req.SetQueryParam(string(key), string(value))
+		})
+
+		resp, err := req.Execute("POST", targetURL)
+		if err != nil {
+			app.logger.Error("Raw upload proxy error", "error", err)
+			return ctx.SendStatus(fiber.StatusBadGateway)
+		}
+
+		ctx.Status(resp.StatusCode())
+		return ctx.Send(resp.Body())
+	}
+
+	// Handle multipart upload
+	app.logger.Info("Proxying multipart upload", "files", len(form.File))
+
+	// Create new multipart writer
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	// Copy files
+	for fieldName, files := range form.File {
+		for _, fileHeader := range files {
+			file, err := fileHeader.Open()
+			if err != nil {
+				app.logger.Error("Failed to open uploaded file", "error", err)
+				continue
+			}
+			defer file.Close()
+
+			// Create form file
+			part, err := writer.CreateFormFile(fieldName, fileHeader.Filename)
+			if err != nil {
+				app.logger.Error("Failed to create form file", "error", err)
+				continue
+			}
+
+			// Copy file content
+			if _, err := io.Copy(part, file); err != nil {
+				app.logger.Error("Failed to copy file content", "error", err)
+				continue
+			}
+
+			app.logger.Info("Added file to multipart",
+				"field", fieldName,
+				"filename", fileHeader.Filename,
+				"size", fileHeader.Size)
+		}
+	}
+
+	// Copy other form values
+	for key, values := range form.Value {
+		for _, value := range values {
+			writer.WriteField(key, value)
+		}
+	}
+
+	writer.Close()
+
+	// Send to target server
+	client := resty.New()
+	client.SetTimeout(30 * time.Second)
+
+	req := client.R()
+	req.SetHeader("Content-Type", writer.FormDataContentType())
+	req.SetBody(&buf)
+
+	// Copy query parameters
+	ctx.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
+		req.SetQueryParam(string(key), string(value))
+	})
+
+	resp, err := req.Execute("POST", targetURL)
+	if err != nil {
+		app.logger.Error("Multipart proxy error", "error", err)
+		return ctx.SendStatus(fiber.StatusBadGateway)
+	}
+
+	app.logger.Info("Multipart proxy response", "status", resp.StatusCode())
+
+	// Copy response headers
+	for key, values := range resp.Header() {
+		for _, value := range values {
+			ctx.Set(key, value)
+		}
+	}
+
+	ctx.Status(resp.StatusCode())
+	return ctx.Send(resp.Body())
 }
 
 func (app *App) uploadVideoToToolsHandler(c *fiber.Ctx) error {

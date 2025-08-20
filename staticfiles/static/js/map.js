@@ -695,74 +695,69 @@ const app = Vue.createApp({
                 alert('Please select files to upload');
                 return;
             }
-
+        
             if (!this.currentFileRepository) {
                 alert('No repository selected');
                 return;
             }
-
+        
             this.isUploading = true;
             const repositoryUid = this.currentFileRepository.uid;
             const successfulUploads = [];
             const failedUploads = [];
-
+        
             for (let i = 0; i < this.selectedFiles.length; i++) {
                 const file = this.selectedFiles[i];
                 this.uploadProgress = Math.round(((i + 1) / this.selectedFiles.length) * 100);
-
+        
                 try {
                     // Add repository UID to filename to associate with this repository
                     const modifiedFileName = `${repositoryUid}_${file.name}`;
                     
+                    // CRITICAL FIX: The Marti API expects specific field names
                     const formData = new FormData();
                     
-                    // Create a new file with the modified name
+                    // Use 'assetfile' as the field name - this is what Marti expects
                     const renamedFile = new File([file], modifiedFileName, { type: file.type });
+                    formData.append('assetfile', renamedFile);
                     
-                    // Try 'file' as the field name (most common) - THIS WAS YOUR WORKING VERSION
-                    formData.append('file', renamedFile);
-                    
-                    // Also try adding the file with its name as the field name
-                    // Some backends expect this format
-                    formData.append(modifiedFileName, renamedFile);
-                    
-                    // Add keywords to associate with repository
-                    formData.append('keywords', repositoryUid);
-                    
-                    // Some backends expect additional metadata
-                    formData.append('filename', modifiedFileName);
-                    formData.append('name', modifiedFileName);
-
-                    // Try without the query parameter first
-                    let response = await fetch('/Marti/sync/upload', {
+                    console.log('Uploading file:', modifiedFileName, 'Type:', file.type, 'Size:', file.size);
+        
+                    // First try: Direct upload to Marti endpoint with the file in FormData
+                    let response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
                         method: 'POST',
                         body: formData
-                        // Don't set Content-Type header - let browser set it with boundary
+                        // Let browser set Content-Type with boundary for multipart/form-data
                     });
-
-                    // If that fails, try with the name parameter
+        
+                    // If the first attempt fails, try sending raw file data
                     if (!response.ok && response.status === 406) {
-                        // Create new FormData for second attempt
+                        console.log('FormData upload failed, trying raw file upload');
+                        
+                        // Second try: Send raw file data with explicit content type
+                        response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': file.type || 'application/octet-stream',
+                                'Content-Length': file.size.toString()
+                            },
+                            body: file // Send raw file
+                        });
+                    }
+        
+                    // If still failing, try with 'file' field name instead of 'assetfile'
+                    if (!response.ok && response.status === 406) {
+                        console.log('Raw upload failed, trying with "file" field name');
+                        
                         const formData2 = new FormData();
                         formData2.append('file', renamedFile);
                         
-                        response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
+                        response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
                             method: 'POST',
                             body: formData2
                         });
                     }
-
-                    // If still failing, try raw file upload
-                    if (!response.ok && response.status === 406) {
-                        response = await fetch('/Marti/sync/upload?name=' + encodeURIComponent(modifiedFileName), {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': file.type || 'application/octet-stream',
-                            },
-                            body: file // Send raw file data
-                        });
-                    }
-
+        
                     if (response.ok) {
                         const result = await response.text();
                         console.log('File uploaded successfully:', result);
@@ -770,6 +765,11 @@ const app = Vue.createApp({
                     } else {
                         const errorText = await response.text();
                         console.error('Upload failed for:', file.name, response.status, errorText);
+                        
+                        // Log more details for debugging
+                        console.error('Response headers:', response.headers);
+                        console.error('Failed URL:', response.url);
+                        
                         failedUploads.push(file.name);
                     }
                 } catch (error) {
@@ -777,11 +777,11 @@ const app = Vue.createApp({
                     failedUploads.push(file.name);
                 }
             }
-
+        
             this.isUploading = false;
             this.uploadProgress = 0;
             this.selectedFiles = null;
-
+        
             // Show results
             let message = `Upload complete!\nSuccessful: ${successfulUploads.length}`;
             if (failedUploads.length > 0) {
@@ -791,7 +791,7 @@ const app = Vue.createApp({
                 }
             }
             alert(message);
-
+        
             // Reload repository files
             await this.loadRepositoryFiles(repositoryUid);
         },
