@@ -490,7 +490,7 @@ const app = Vue.createApp({
 
         // NEW CAMERA METHODS
         async addCameraPoint(latlng) {
-            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "rtsp://example.com/stream");
+            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://147.177.46.185:8889/camera1/whep");
             if (!streamUrl) {
                 return; // User cancelled
             }
@@ -500,14 +500,13 @@ const app = Vue.createApp({
             let stale = new Date(now);
             stale.setDate(stale.getDate() + 365);
 
-            // Detect stream type based on URL
+            // Use the proper detectStreamType function
             const streamType = this.detectStreamType(streamUrl);
-            const streamName = "Camera";
 
             let u = {
                 uid: uid,
                 category: "point",
-                callsign: streamName + "-" + this.point_num++,
+                callsign: "Camera-" + this.point_num++,
                 sidc: "",
                 start_time: now,
                 last_seen: now,
@@ -519,12 +518,19 @@ const app = Vue.createApp({
                 speed: 0,
                 course: 0,
                 status: "",
-                text: "Camera feed: " + streamUrl,
+                // STORE STREAM INFO IN STANDARD TEXT FIELD AS JSON:
+                text: JSON.stringify({
+                    description: "Camera feed",
+                    streamUrl: streamUrl,
+                    streamType: streamType
+                }),
                 parent_uid: "",
                 parent_callsign: "",
                 color: "#0066cc",
                 send: true,
                 local: true,
+                
+                // Keep these for local client only:
                 isCamera: true,
                 streamUrl: streamUrl,
                 streamType: streamType
@@ -714,49 +720,16 @@ const app = Vue.createApp({
                     // Add repository UID to filename to associate with this repository
                     const modifiedFileName = `${repositoryUid}_${file.name}`;
                     
-                    // CRITICAL FIX: The Marti API expects specific field names
                     const formData = new FormData();
-                    
-                    // Use 'assetfile' as the field name - this is what Marti expects
-                    const renamedFile = new File([file], modifiedFileName, { type: file.type });
-                    formData.append('assetfile', renamedFile);
-                    
-                    console.log('Uploading file:', modifiedFileName, 'Type:', file.type, 'Size:', file.size);
+                    // USE EXACT SAME PATTERN AS saveStandaloneRecording
+                    formData.append('assetfile', file, modifiedFileName);
         
-                    // First try: Direct upload to Marti endpoint with the file in FormData
-                    let response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
+                    // USE EXACT SAME PATTERN - name query parameter
+                    const response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
                         method: 'POST',
                         body: formData
-                        // Let browser set Content-Type with boundary for multipart/form-data
+                        // DO NOT set Content-Type header - browser must set it automatically with boundary
                     });
-        
-                    // If the first attempt fails, try sending raw file data
-                    if (!response.ok && response.status === 406) {
-                        console.log('FormData upload failed, trying raw file upload');
-                        
-                        // Second try: Send raw file data with explicit content type
-                        response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': file.type || 'application/octet-stream',
-                                'Content-Length': file.size.toString()
-                            },
-                            body: file // Send raw file
-                        });
-                    }
-        
-                    // If still failing, try with 'file' field name instead of 'assetfile'
-                    if (!response.ok && response.status === 406) {
-                        console.log('Raw upload failed, trying with "file" field name');
-                        
-                        const formData2 = new FormData();
-                        formData2.append('file', renamedFile);
-                        
-                        response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
-                            method: 'POST',
-                            body: formData2
-                        });
-                    }
         
                     if (response.ok) {
                         const result = await response.text();
@@ -765,11 +738,6 @@ const app = Vue.createApp({
                     } else {
                         const errorText = await response.text();
                         console.error('Upload failed for:', file.name, response.status, errorText);
-                        
-                        // Log more details for debugging
-                        console.error('Response headers:', response.headers);
-                        console.error('Failed URL:', response.url);
-                        
                         failedUploads.push(file.name);
                     }
                 } catch (error) {
@@ -1631,19 +1599,14 @@ const app = Vue.createApp({
         },
 
         addOrMove(name, coord, icon) {
-            if (this.tools.has(name)) {
-                this.tools.get(name).setLatLng(coord);
-            } else {
-                let p = new L.marker(coord).addTo(map);
-                if (icon) {
-                    p.setIcon(L.icon({
-                        iconUrl: icon,
-                        iconSize: [20, 20],
-                        iconAnchor: new L.Point(10, 10),
-                    }));
-                }
-                this.tools.set(name, p);
-            }
+            this.removeTool(name);
+            let marker = L.marker(coord);
+            marker.setIcon(L.icon({
+                iconUrl: icon,
+                iconAnchor: new L.Point(16, 16),
+            }));
+            marker.addTo(map);
+            this.tools.set(name, marker);
             this.ts++;
         },
 
@@ -1810,6 +1773,34 @@ const app = Vue.createApp({
             fetch("/api/message", requestOptions)
                 .then(resp => resp.json())
                 .then(d => vm.messages = d);
+        },
+
+        detectStreamType: function(streamUrl) {
+            const url = streamUrl.toLowerCase();
+            
+            // RTSP streams
+            if (url.startsWith('rtsp://')) return 'rtsp';
+            
+            // HLS streams (Apple HTTP Live Streaming)
+            if (url.includes('.m3u8') || url.includes('/hls/')) return 'hls';
+            
+            // WebRTC streams - MediaMTX typically uses port 8889 for WebRTC
+            if (url.includes(':8889/') || 
+                url.includes('/whep') || 
+                url.includes('/webrtc/') ||
+                url.includes('webrtc')) return 'webrtc';
+            
+            // Webcam placeholder
+            if (url === 'webcam://live-stream') return 'webcam';
+            
+            // WebM, MP4, or other video files
+            if (url.includes('.webm') || 
+                url.includes('.mp4') || 
+                url.includes('.avi') || 
+                url.includes('.mov')) return 'video';
+            
+            // Default to regular video
+            return 'video';
         }
     },
 

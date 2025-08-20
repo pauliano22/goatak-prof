@@ -17,7 +17,6 @@ import (
 	"github.com/kdudkov/goatak/pkg/log"
 	"github.com/kdudkov/goatak/staticfiles"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/template/html/v2"
@@ -294,179 +293,196 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		host := "147.177.46.185:8080"
 		url := fmt.Sprintf("http://%s%s", host, path)
 
+		// Copy query string if present
+		if queryString := string(ctx.Request().URI().QueryString()); queryString != "" {
+			url = url + "?" + queryString
+		}
+
 		app.logger.Info("PROXY REQUEST",
 			"path", path,
 			"method", method,
-			"query", ctx.Request().URI().QueryString())
+			"url", url,
+			"content-type", string(ctx.Request().Header.ContentType()))
 
-		// Handle file uploads specially
+		// Special handling for file uploads
 		if strings.Contains(path, "/Marti/sync/upload") {
-			return handleFileUploadProxy(app, ctx, url)
+			return handleMultipartUploadProxy(app, ctx, url)
 		}
 
-		// Create request using resty
-		client := resty.New()
-		client.SetTimeout(30 * time.Second)
+		// For non-upload requests, use the simple proxy
+		return simpleProxy(app, ctx, url, method)
+	}
+}
 
-		req := client.R()
+func handleMultipartUploadProxy(app *App, ctx *fiber.Ctx, targetURL string) error {
+	// Get the content type to check if it's multipart
+	contentType := string(ctx.Request().Header.ContentType())
 
-		// Copy headers EXCEPT Content-Type for multipart
-		for key, values := range ctx.GetReqHeaders() {
-			// Skip content-length as resty will set it
-			if strings.ToLower(key) == "content-length" {
-				continue
-			}
-			for _, value := range values {
-				req.SetHeader(key, value)
-			}
-		}
-
-		// Copy body for POST/PUT requests
-		if method == "POST" || method == "PUT" {
-			req.SetBody(ctx.Body())
-		}
-
-		// Copy query parameters
-		ctx.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
-			req.SetQueryParam(string(key), string(value))
-		})
-
-		// Execute request
-		resp, err := req.Execute(method, url)
+	if strings.Contains(contentType, "multipart/form-data") {
+		// Parse the multipart form
+		form, err := ctx.MultipartForm()
 		if err != nil {
-			app.logger.Error("PROXY ERROR", "error", err, "url", url)
-			return ctx.SendStatus(fiber.StatusBadGateway)
+			app.logger.Error("Failed to parse multipart form", "error", err)
+			return ctx.Status(fiber.StatusBadRequest).SendString("Failed to parse multipart form")
 		}
 
-		app.logger.Info("PROXY RESPONSE", "status", resp.StatusCode(), "url", url)
+		// Create a buffer and multipart writer
+		var requestBody bytes.Buffer
+		writer := multipart.NewWriter(&requestBody)
+
+		// Process files - handle 'assetfile' field specifically
+		if files, ok := form.File["assetfile"]; ok {
+			for _, fileHeader := range files {
+				// Open the uploaded file
+				file, err := fileHeader.Open()
+				if err != nil {
+					app.logger.Error("Failed to open file", "error", err)
+					continue
+				}
+				defer file.Close()
+
+				// Create the form file field
+				part, err := writer.CreateFormFile("assetfile", fileHeader.Filename)
+				if err != nil {
+					app.logger.Error("Failed to create form file", "error", err)
+					continue
+				}
+
+				// Copy file content
+				if _, err := io.Copy(part, file); err != nil {
+					app.logger.Error("Failed to copy file", "error", err)
+					continue
+				}
+
+				app.logger.Info("Proxying file upload",
+					"filename", fileHeader.Filename,
+					"size", fileHeader.Size)
+			}
+		}
+
+		// Also check for 'file' field as fallback
+		if files, ok := form.File["file"]; ok {
+			for _, fileHeader := range files {
+				file, err := fileHeader.Open()
+				if err != nil {
+					continue
+				}
+				defer file.Close()
+
+				part, err := writer.CreateFormFile("file", fileHeader.Filename)
+				if err != nil {
+					continue
+				}
+
+				io.Copy(part, file)
+			}
+		}
+
+		// Add any other form fields
+		for key, values := range form.Value {
+			for _, value := range values {
+				writer.WriteField(key, value)
+			}
+		}
+
+		// Close the writer to finalize the form
+		writer.Close()
+
+		// Create the HTTP request
+		req, err := http.NewRequest("POST", targetURL, &requestBody)
+		if err != nil {
+			app.logger.Error("Failed to create request", "error", err)
+			return ctx.Status(fiber.StatusInternalServerError).SendString("Failed to create request")
+		}
+
+		// Set the content type with the boundary
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+
+		// Forward the request
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			app.logger.Error("Failed to forward request", "error", err)
+			return ctx.Status(fiber.StatusBadGateway).SendString("Failed to forward request")
+		}
+		defer resp.Body.Close()
+
+		// Read response body
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			app.logger.Error("Failed to read response", "error", err)
+			return ctx.Status(fiber.StatusInternalServerError).SendString("Failed to read response")
+		}
+
+		app.logger.Info("Upload proxy response", "status", resp.StatusCode)
 
 		// Copy response headers
-		for key, values := range resp.Header() {
+		for key, values := range resp.Header {
 			for _, value := range values {
 				ctx.Set(key, value)
 			}
 		}
 
-		ctx.Status(resp.StatusCode())
-		return ctx.Send(resp.Body())
+		// Return response
+		ctx.Status(resp.StatusCode)
+		return ctx.Send(body)
+	} else {
+		// Not multipart, handle as raw body
+		return simpleProxy(app, ctx, targetURL, "POST")
 	}
 }
 
-func handleFileUploadProxy(app *App, ctx *fiber.Ctx, targetURL string) error {
-	// Parse multipart form
-	form, err := ctx.MultipartForm()
+func simpleProxy(app *App, ctx *fiber.Ctx, targetURL string, method string) error {
+	// Create HTTP request
+	var req *http.Request
+	var err error
+
+	if method == "POST" || method == "PUT" {
+		req, err = http.NewRequest(method, targetURL, bytes.NewReader(ctx.Body()))
+	} else {
+		req, err = http.NewRequest(method, targetURL, nil)
+	}
+
 	if err != nil {
-		// If not multipart, try raw body upload
-		app.logger.Info("Not multipart, trying raw body upload")
-
-		client := resty.New()
-		client.SetTimeout(30 * time.Second)
-
-		req := client.R()
-
-		// Copy headers
-		for key, values := range ctx.GetReqHeaders() {
-			if strings.ToLower(key) != "content-length" {
-				for _, value := range values {
-					req.SetHeader(key, value)
-				}
-			}
-		}
-
-		// Set body
-		req.SetBody(ctx.Body())
-
-		// Copy query params
-		ctx.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
-			req.SetQueryParam(string(key), string(value))
-		})
-
-		resp, err := req.Execute("POST", targetURL)
-		if err != nil {
-			app.logger.Error("Raw upload proxy error", "error", err)
-			return ctx.SendStatus(fiber.StatusBadGateway)
-		}
-
-		ctx.Status(resp.StatusCode())
-		return ctx.Send(resp.Body())
+		app.logger.Error("Failed to create request", "error", err)
+		return ctx.Status(fiber.StatusInternalServerError).SendString("Failed to create request")
 	}
 
-	// Handle multipart upload
-	app.logger.Info("Proxying multipart upload", "files", len(form.File))
-
-	// Create new multipart writer
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-
-	// Copy files
-	for fieldName, files := range form.File {
-		for _, fileHeader := range files {
-			file, err := fileHeader.Open()
-			if err != nil {
-				app.logger.Error("Failed to open uploaded file", "error", err)
-				continue
-			}
-			defer file.Close()
-
-			// Create form file
-			part, err := writer.CreateFormFile(fieldName, fileHeader.Filename)
-			if err != nil {
-				app.logger.Error("Failed to create form file", "error", err)
-				continue
-			}
-
-			// Copy file content
-			if _, err := io.Copy(part, file); err != nil {
-				app.logger.Error("Failed to copy file content", "error", err)
-				continue
-			}
-
-			app.logger.Info("Added file to multipart",
-				"field", fieldName,
-				"filename", fileHeader.Filename,
-				"size", fileHeader.Size)
+	// Copy headers from original request
+	ctx.Request().Header.VisitAll(func(key, value []byte) {
+		keyStr := string(key)
+		// Skip hop-by-hop headers
+		if keyStr == "Connection" || keyStr == "Upgrade" || keyStr == "Host" {
+			return
 		}
-	}
-
-	// Copy other form values
-	for key, values := range form.Value {
-		for _, value := range values {
-			writer.WriteField(key, value)
-		}
-	}
-
-	writer.Close()
-
-	// Send to target server
-	client := resty.New()
-	client.SetTimeout(30 * time.Second)
-
-	req := client.R()
-	req.SetHeader("Content-Type", writer.FormDataContentType())
-	req.SetBody(&buf)
-
-	// Copy query parameters
-	ctx.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
-		req.SetQueryParam(string(key), string(value))
+		req.Header.Set(keyStr, string(value))
 	})
 
-	resp, err := req.Execute("POST", targetURL)
+	// Forward the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
-		app.logger.Error("Multipart proxy error", "error", err)
-		return ctx.SendStatus(fiber.StatusBadGateway)
+		app.logger.Error("Request failed", "error", err)
+		return ctx.Status(fiber.StatusBadGateway).SendString("Request failed")
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		app.logger.Error("Failed to read response", "error", err)
+		return ctx.Status(fiber.StatusInternalServerError).SendString("Failed to read response")
 	}
 
-	app.logger.Info("Multipart proxy response", "status", resp.StatusCode())
-
 	// Copy response headers
-	for key, values := range resp.Header() {
+	for key, values := range resp.Header {
 		for _, value := range values {
 			ctx.Set(key, value)
 		}
 	}
 
-	ctx.Status(resp.StatusCode())
-	return ctx.Send(resp.Body())
+	ctx.Status(resp.StatusCode)
+	return ctx.Send(body)
 }
 
 func (app *App) uploadVideoToToolsHandler(c *fiber.Ctx) error {
