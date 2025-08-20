@@ -282,12 +282,12 @@ func getLayers() []map[string]any {
 
 func getMartiProxyHandler(app *App) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
-		if app.remoteAPI.host == "" {
-			return ctx.SendStatus(fiber.StatusServiceUnavailable)
-		}
-
 		path := ctx.Path()
 		method := ctx.Method()
+
+		// Build URL with port 8080 for Marti API
+		host := "147.177.46.185:8080" // Hardcode Marti API host:port
+		url := fmt.Sprintf("http://%s%s", host, path)
 
 		// Create the request
 		req := app.remoteAPI.request(path)
@@ -309,10 +309,10 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 			req.SetQueryParam(key, value)
 		}
 
-		// Execute request
-		resp, err := req.SetContext(ctx.Context()).Execute(method, app.remoteAPI.getURL(path))
+		// Execute request with hardcoded URL
+		resp, err := req.SetContext(ctx.Context()).Execute(method, url)
 		if err != nil {
-			app.logger.Warn("Failed to proxy request", "error", err, "path", path)
+			app.logger.Warn("Failed to proxy request", "error", err, "path", path, "url", url)
 			return ctx.SendStatus(fiber.StatusBadGateway)
 		}
 
