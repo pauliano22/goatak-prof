@@ -289,8 +289,11 @@ func getMartiProxyHandler(app *App) fiber.Handler {
 		path := ctx.Path()
 		method := ctx.Method()
 
-		// Your remote server
-		host := "147.177.46.185:8080"
+		// Your remote server - COMMENTED OUT FOR LOCAL TESTING
+		// host := "147.177.46.185:8080"
+
+		// Use localhost for testing
+		host := "localhost:8080"
 		url := fmt.Sprintf("http://%s%s", host, path)
 
 		// Copy query string if present

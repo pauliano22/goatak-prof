@@ -490,11 +490,15 @@ const app = Vue.createApp({
 
         // NEW CAMERA METHODS
         async addCameraPoint(latlng) {
-            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://147.177.46.185:8889/camera1/whep");
+            // const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://147.177.46.185:8889/camera1/whep");
+            
+            // Use localhost for testing
+            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://localhost:8889/camera1/whep");
+            
             if (!streamUrl) {
                 return; // User cancelled
             }
-
+            
             let uid = uuidv4();
             let now = new Date();
             let stale = new Date(now);
