@@ -1,6 +1,6 @@
 ---
 # server address to connect to
-server_address: localhost:8999:tcp
+server_address: 147.177.46.185:8999:tcp
 # server_address: 147.177.46.185:8999:tcp
 # local port for web server
 web_port: 8081

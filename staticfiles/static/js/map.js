@@ -531,7 +531,7 @@ const app = Vue.createApp({
 
                     // Generate unique stream name
                     const streamName = `camera_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                    const streamUrl = `http://localhost:8889/${streamName}`;
+                    const streamUrl = `http://147.177.46.185:8889/${streamName}`;
 
                     // Start publishing to MediaMTX
                     await this.publishStreamToMediaMTX(stream, streamName);
@@ -593,7 +593,7 @@ const app = Vue.createApp({
 
                 } else {
                     // Manual URL entry (existing functionality)
-                    const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://localhost:8889/camera1/whep");
+                    const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://147.177.46.185:8889/camera1/whep");
 
                     if (!streamUrl) {
                         return; // User cancelled
@@ -654,7 +654,7 @@ const app = Vue.createApp({
 
                 // Better error messages with MediaMTX setup guidance
                 if (error.message.includes('fetch')) {
-                    alert(`Could not connect to MediaMTX server.\n\nPlease ensure:\n1. MediaMTX is running on localhost:8889\n2. WHIP/WHEP is enabled in mediamtx.yml:\n   webrtc: yes\n   whip: yes\n   whep: yes\n\nError: ${error.message}`);
+                    alert(`Could not connect to MediaMTX server.\n\nPlease ensure:\n1. MediaMTX is running on 147.177.46.185:8889\n2. WHIP/WHEP is enabled in mediamtx.yml:\n   webrtc: yes\n   whip: yes\n   whep: yes\n\nError: ${error.message}`);
                 } else {
                     alert('Could not access webcam: ' + error.message);
                 }
@@ -2010,7 +2010,7 @@ const app = Vue.createApp({
                 });
 
                 // Send offer to MediaMTX WHIP endpoint
-                const whipUrl = `http://localhost:8889/${streamName}/whip`;
+                const whipUrl = `http://147.177.46.185:8889/${streamName}/whip`;
 
                 console.log('Publishing to WHIP endpoint:', whipUrl);
 
@@ -2160,7 +2160,7 @@ const app = Vue.createApp({
 
             // Handle the new browser-published streams
             if (unit.unit.streamName) {
-                streamUrl = `http://localhost:8889/${unit.unit.streamName}`;
+                streamUrl = `http://147.177.46.185:8889/${unit.unit.streamName}`;
                 console.log('Using stream base URL:', streamUrl);
 
                 // Check stream status
