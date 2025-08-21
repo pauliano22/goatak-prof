@@ -507,7 +507,7 @@ const app = Vue.createApp({
             try {
                 // Ask user if they want to stream live webcam or enter a URL
                 const choice = confirm("Do you want to stream your live webcam?\n\nClick OK for live webcam\nClick Cancel to enter a stream URL");
-                
+
                 if (choice) {
                     // Video quality selection
                     const qualityOptions = {
@@ -515,14 +515,14 @@ const app = Vue.createApp({
                         "2": { width: 1280, height: 720, label: "Medium (1280x720)" },
                         "3": { width: 1920, height: 1080, label: "High (1920x1080)" }
                     };
-                    
+
                     const qualityChoice = prompt("Choose video quality:\n1 = Low (640x480)\n2 = Medium (1280x720)\n3 = High (1920x1080)", "2");
                     const selectedQuality = qualityOptions[qualityChoice] || qualityOptions["2"];
-                    
+
                     // Get user's webcam stream with selected quality
                     const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { 
-                            width: selectedQuality.width, 
+                        video: {
+                            width: selectedQuality.width,
                             height: selectedQuality.height,
                             frameRate: 30
                         },
@@ -594,11 +594,11 @@ const app = Vue.createApp({
                 } else {
                     // Manual URL entry (existing functionality)
                     const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://localhost:8889/camera1/whep");
-                    
+
                     if (!streamUrl) {
                         return; // User cancelled
                     }
-                    
+
                     let uid = uuidv4();
                     let now = new Date();
                     let stale = new Date(now);
@@ -651,7 +651,7 @@ const app = Vue.createApp({
 
             } catch (error) {
                 console.error('Error creating camera stream:', error);
-                
+
                 // Better error messages with MediaMTX setup guidance
                 if (error.message.includes('fetch')) {
                     alert(`Could not connect to MediaMTX server.\n\nPlease ensure:\n1. MediaMTX is running on localhost:8889\n2. WHIP/WHEP is enabled in mediamtx.yml:\n   webrtc: yes\n   whip: yes\n   whep: yes\n\nError: ${error.message}`);
@@ -748,13 +748,59 @@ const app = Vue.createApp({
                 const data = await response.json();
                 const allFiles = data.results || [];
 
-                // Filter files that belong to this repository
-                this.repositoryFiles = allFiles.filter(file => {
-                    return file.Keywords && file.Keywords.includes(repositoryUid) ||
-                        file.FileName && file.FileName.includes(repositoryUid);
+                console.log('=== Repository File Loading Debug ===');
+                console.log('Looking for repository UID:', repositoryUid);
+                console.log('Total files from server:', allFiles.length);
+
+                // Show first few files for debugging with FULL keyword details
+                allFiles.slice(0, 5).forEach((file, index) => {
+                    console.log(`File ${index + 1}:`, {
+                        FileName: file.FileName,
+                        Keywords: file.Keywords,
+                        KeywordsType: typeof file.Keywords,
+                        KeywordsLength: file.Keywords ? file.Keywords.length : 0,
+                        KeywordsContent: file.Keywords ? JSON.stringify(file.Keywords) : 'null',
+                        MIMEType: file.MIMEType,
+                        Size: file.Size,
+                        Hash: file.Hash.length > 40 ? file.Hash.substring(0, 20) + '...' : file.Hash
+                    });
                 });
 
-                console.log('Found repository files:', this.repositoryFiles);
+                // Enhanced filtering with better logic
+                this.repositoryFiles = allFiles.filter(file => {
+                    // Check filename contains repository UID
+                    const filenameMatch = file.FileName && file.FileName.includes(repositoryUid);
+
+                    // Enhanced keyword checking
+                    let keywordMatch = false;
+                    if (file.Keywords) {
+                        if (typeof file.Keywords === 'string') {
+                            keywordMatch = file.Keywords.includes(repositoryUid);
+                        } else if (Array.isArray(file.Keywords)) {
+                            keywordMatch = file.Keywords.some(keyword =>
+                                typeof keyword === 'string' && keyword.includes(repositoryUid)
+                            );
+                        }
+                    }
+
+                    const match = filenameMatch || keywordMatch;
+
+                    // Log detailed checking for debugging
+                    console.log(`Checking file: ${file.FileName}`, {
+                        Keywords: file.Keywords,
+                        KeywordsDetails: JSON.stringify(file.Keywords),
+                        MIMEType: file.MIMEType,
+                        filenameMatch,
+                        keywordMatch,
+                        match: match ? '✓' : '✗'
+                    });
+
+                    return match;
+                });
+
+                console.log(`Found ${this.repositoryFiles.length} files for repository ${repositoryUid}`);
+                console.log('=== End Debug ===');
+
             } catch (error) {
                 console.error('Failed to load repository files:', error);
                 this.repositoryFiles = [];
@@ -766,32 +812,57 @@ const app = Vue.createApp({
                 alert('Please select files to upload');
                 return;
             }
-        
+
             if (!this.currentFileRepository) {
                 alert('No repository selected');
                 return;
             }
-        
+
             this.isUploading = true;
             const repositoryUid = this.currentFileRepository.uid;
             const successfulUploads = [];
             const failedUploads = [];
-        
+
             for (let i = 0; i < this.selectedFiles.length; i++) {
                 const file = this.selectedFiles[i];
                 this.uploadProgress = Math.round(((i + 1) / this.selectedFiles.length) * 100);
-        
+
                 try {
+                    // Check file size against the 64MB server limit
+                    if (file.size > 60 * 1024 * 1024) { // 60MB to be safe
+                        failedUploads.push(`${file.name} (exceeds 64MB server limit)`);
+                        continue;
+                    }
+
                     const modifiedFileName = `${repositoryUid}_${file.name}`;
-                    
+
                     const formData = new FormData();
                     formData.append('assetfile', file, modifiedFileName);
-        
+
+                    // CRITICAL: Set keywords for repository filtering
+                    formData.append('keywords', repositoryUid);
+
+                    // Add additional metadata
+                    if (this.config && this.config.uid) {
+                        formData.append('creatorUid', this.config.uid);
+                    }
+                    if (this.config && this.config.callsign) {
+                        formData.append('submissionUser', this.config.callsign);
+                    }
+
+                    console.log('Uploading file:', {
+                        name: modifiedFileName,
+                        originalName: file.name,
+                        size: this.formatFileSize(file.size),
+                        type: file.type,
+                        keywords: repositoryUid
+                    });
+
                     const response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
                         method: 'POST',
                         body: formData
                     });
-        
+
                     if (response.ok) {
                         const result = await response.text();
                         console.log('File uploaded successfully:', result);
@@ -799,25 +870,29 @@ const app = Vue.createApp({
                     } else {
                         const errorText = await response.text();
                         console.error('Upload failed for:', file.name, response.status, errorText);
-                        failedUploads.push(file.name);
+                        failedUploads.push(`${file.name} (${response.status})`);
                     }
                 } catch (error) {
                     console.error('Upload error for:', file.name, error);
-                    failedUploads.push(file.name);
+                    failedUploads.push(`${file.name} (${error.message})`);
                 }
             }
-        
+
             this.isUploading = false;
             this.uploadProgress = 0;
             this.selectedFiles = null;
-        
+
+            // Show results
             let message = `Upload complete!\nSuccessful: ${successfulUploads.length}`;
             if (failedUploads.length > 0) {
-                message += `\nFailed: ${failedUploads.length}`;
+                message += `\nFailed: ${failedUploads.length}\nReasons: ${failedUploads.join(', ')}`;
             }
             alert(message);
-        
-            await this.loadRepositoryFiles(repositoryUid);
+
+            // Wait for server processing then reload
+            setTimeout(async () => {
+                await this.loadRepositoryFiles(repositoryUid);
+            }, 1500);
         },
 
         handleFileSelection(event) {
@@ -1011,11 +1086,20 @@ const app = Vue.createApp({
                 const formData = new FormData();
                 formData.append('assetfile', blob, filename);
 
-                // CRITICAL: Make sure browser detects this as multipart/form-data
+                // Add keywords for better organization
+                formData.append('keywords', 'webcam-recording,video,standalone');
+
+                // Add creator info if available
+                if (this.config && this.config.uid) {
+                    formData.append('creatorUid', this.config.uid);
+                }
+                if (this.config && this.config.callsign) {
+                    formData.append('submissionUser', this.config.callsign);
+                }
+
                 const response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(filename)}`, {
                     method: 'POST',
                     body: formData
-                    // DO NOT set Content-Type header - browser must set it automatically with boundary
                 });
 
                 if (response.ok) {
@@ -1109,10 +1193,19 @@ const app = Vue.createApp({
 
                 const formData = new FormData();
                 formData.append('assetfile', blob, filename);
-                formData.append('keywords', this.currentFileRepository.uid);
-                formData.append('filename', filename);
 
-                const response = await fetch('/Marti/sync/upload', {
+                // CRITICAL: Add keywords for repository filtering
+                formData.append('keywords', this.currentFileRepository.uid);
+
+                // Add additional metadata
+                if (this.config && this.config.uid) {
+                    formData.append('creatorUid', this.config.uid);
+                }
+                if (this.config && this.config.callsign) {
+                    formData.append('submissionUser', this.config.callsign);
+                }
+
+                const response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(filename)}`, {
                     method: 'POST',
                     body: formData
                 });
@@ -1146,26 +1239,26 @@ const app = Vue.createApp({
             if (!videoElement) {
                 throw new Error('Video element not found');
             }
-        
+
             console.log('Setting up WebRTC for video element:', videoElement);
-        
+
             // Clean up existing connection properly
             if (this.webrtcPeerConnection) {
                 console.log('Closing existing WebRTC connection');
                 this.webrtcPeerConnection.close();
                 this.webrtcPeerConnection = null;
             }
-        
+
             // Clear any existing video source and stop tracks
             if (videoElement.srcObject) {
                 videoElement.srcObject.getTracks().forEach(track => track.stop());
                 videoElement.srcObject = null;
             }
-        
+
             // Clear any src attribute that might interfere
             videoElement.removeAttribute('src');
             videoElement.load(); // Reset video element
-        
+
             this.webrtcPeerConnection = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
                 // Add these optimizations for better performance
@@ -1174,21 +1267,21 @@ const app = Vue.createApp({
                 // Optimize for low latency
                 iceTransportPolicy: 'all'
             });
-        
+
             // Add transceivers for receiving
-            this.webrtcPeerConnection.addTransceiver('video', { 
+            this.webrtcPeerConnection.addTransceiver('video', {
                 direction: 'recvonly'
             });
-            this.webrtcPeerConnection.addTransceiver('audio', { 
+            this.webrtcPeerConnection.addTransceiver('audio', {
                 direction: 'recvonly'
             });
-        
+
             this.webrtcPeerConnection.ontrack = (event) => {
                 console.log('Received WebRTC track:', event.track.kind, event.track.readyState);
                 if (event.streams && event.streams[0]) {
                     console.log('Setting video srcObject');
                     videoElement.srcObject = event.streams[0];
-                    
+
                     // Add some delay to ensure stream is ready
                     setTimeout(() => {
                         videoElement.play().catch(e => {
@@ -1198,7 +1291,7 @@ const app = Vue.createApp({
                     }, 200);
                 }
             };
-        
+
             this.webrtcPeerConnection.oniceconnectionstatechange = () => {
                 console.log('ICE connection state:', this.webrtcPeerConnection.iceConnectionState);
                 if (this.webrtcPeerConnection.iceConnectionState === 'connected') {
@@ -1207,41 +1300,41 @@ const app = Vue.createApp({
                     console.error('WebRTC connection failed');
                 }
             };
-        
+
             this.webrtcPeerConnection.onconnectionstatechange = () => {
                 console.log('Connection state:', this.webrtcPeerConnection.connectionState);
             };
-        
+
             try {
                 const offer = await this.webrtcPeerConnection.createOffer({
                     offerToReceiveVideo: true,
                     offerToReceiveAudio: true
                 });
-                
+
                 await this.webrtcPeerConnection.setLocalDescription(offer);
-        
+
                 // Use trickle ICE - don't wait for complete gathering
                 const whepUrl = streamUrl + '/whep';
                 console.log('Connecting to WHEP endpoint:', whepUrl);
-        
+
                 const response = await fetch(whepUrl, {
                     method: 'POST',
-                    headers: { 
+                    headers: {
                         'Content-Type': 'application/sdp',
                         'Accept': 'application/sdp'
                     },
                     body: this.webrtcPeerConnection.localDescription.sdp
                 });
-        
+
                 if (response.ok) {
                     const answerSdp = await response.text();
                     console.log('Received answer SDP, setting remote description');
-                    
+
                     await this.webrtcPeerConnection.setRemoteDescription({
                         type: 'answer',
                         sdp: answerSdp
                     });
-                    
+
                     console.log('WebRTC connection setup complete');
                 } else {
                     const errorText = await response.text();
@@ -1353,7 +1446,7 @@ const app = Vue.createApp({
                     videoElement.srcObject.getTracks().forEach(track => track.stop());
                     videoElement.srcObject = null;
                 }
-                
+
                 videoElement.pause();
                 videoElement.removeAttribute('src');
                 videoElement.load(); // Reset the video element
@@ -1837,30 +1930,30 @@ const app = Vue.createApp({
                 .then(d => vm.messages = d);
         },
 
-        detectStreamType: function(streamUrl) {
+        detectStreamType: function (streamUrl) {
             const url = streamUrl.toLowerCase();
-            
+
             // RTSP streams
             if (url.startsWith('rtsp://')) return 'rtsp';
-            
+
             // HLS streams (Apple HTTP Live Streaming)
             if (url.includes('.m3u8') || url.includes('/hls/')) return 'hls';
-            
+
             // WebRTC streams - MediaMTX typically uses port 8889 for WebRTC
-            if (url.includes(':8889/') || 
-                url.includes('/whep') || 
+            if (url.includes(':8889/') ||
+                url.includes('/whep') ||
                 url.includes('/webrtc/') ||
                 url.includes('webrtc')) return 'webrtc';
-            
+
             // Webcam placeholder
             if (url === 'webcam://live-stream') return 'webcam';
-            
+
             // WebM, MP4, or other video files
-            if (url.includes('.webm') || 
-                url.includes('.mp4') || 
-                url.includes('.avi') || 
+            if (url.includes('.webm') ||
+                url.includes('.mp4') ||
+                url.includes('.avi') ||
                 url.includes('.mov')) return 'video';
-            
+
             // Default to regular video
             return 'video';
         },
@@ -1882,11 +1975,11 @@ const app = Vue.createApp({
                 pc.oniceconnectionstatechange = () => {
                     console.log('Publisher ICE connection state:', pc.iceConnectionState);
                     this.activeStreamStatus.set(streamName, pc.iceConnectionState);
-                    
+
                     if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
                         console.log('Publisher connection failed/disconnected for:', streamName);
                         this.activeStreamStatus.set(streamName, 'failed');
-                        
+
                         // Attempt to reconnect after 3 seconds
                         setTimeout(() => {
                             if (this.activePublishers.has(streamName)) {
@@ -1918,7 +2011,7 @@ const app = Vue.createApp({
 
                 // Send offer to MediaMTX WHIP endpoint
                 const whipUrl = `http://localhost:8889/${streamName}/whip`;
-                
+
                 console.log('Publishing to WHIP endpoint:', whipUrl);
 
                 const response = await fetch(whipUrl, {
@@ -1937,7 +2030,7 @@ const app = Vue.createApp({
                 // Get answer from MediaMTX
                 const answerSdp = await response.text();
                 console.log('Received WHIP answer SDP:', answerSdp.substring(0, 200) + '...');
-                
+
                 await pc.setRemoteDescription({
                     type: 'answer',
                     sdp: answerSdp
@@ -1962,18 +2055,18 @@ const app = Vue.createApp({
         async republishStream(streamName, stream) {
             try {
                 console.log('Republishing stream:', streamName);
-                
+
                 // Remove old connection
                 if (this.activePublishers.has(streamName)) {
                     const { pc } = this.activePublishers.get(streamName);
                     pc.close();
                     this.activePublishers.delete(streamName);
                 }
-                
+
                 // Republish
                 await this.publishStreamToMediaMTX(stream, streamName);
                 console.log('Stream reconnected successfully:', streamName);
-                
+
             } catch (error) {
                 console.error('Failed to reconnect stream:', streamName, error);
                 this.activeStreamStatus.set(streamName, 'reconnect_failed');
@@ -1986,26 +2079,26 @@ const app = Vue.createApp({
                 alert('This camera point does not have an active stream.');
                 return;
             }
-            
+
             if (!this.myActiveStreams.has(unit.unit.streamName)) {
                 alert('You can only stop streams that you started.');
                 return;
             }
-            
+
             if (confirm(`Stop streaming for ${unit.unit.callsign}?`)) {
                 // Stop the publisher
                 this.stopPublishing(unit.unit.streamName);
-                
+
                 // Update the unit status
                 try {
                     const textData = JSON.parse(unit.unit.text);
                     textData.status = 'stopped';
                     textData.stoppedAt = new Date().toISOString();
-                    
+
                     unit.unit.text = JSON.stringify(textData);
                     unit.unit.color = "#666666"; // Gray out stopped cameras
                     unit.post();
-                    
+
                     alert('Stream stopped successfully.');
                 } catch (e) {
                     console.error('Error updating unit status:', e);
@@ -2022,18 +2115,18 @@ const app = Vue.createApp({
         stopPublishing(streamName) {
             if (this.activePublishers && this.activePublishers.has(streamName)) {
                 const { pc, stream } = this.activePublishers.get(streamName);
-                
+
                 // Stop all tracks
                 stream.getTracks().forEach(track => track.stop());
-                
+
                 // Close peer connection
                 pc.close();
-                
+
                 // Remove from active publishers and status tracking
                 this.activePublishers.delete(streamName);
                 this.myActiveStreams.delete(streamName);
                 this.activeStreamStatus.delete(streamName);
-                
+
                 console.log('Stopped publishing stream:', streamName);
             }
         },
@@ -2043,33 +2136,33 @@ const app = Vue.createApp({
                 console.log('Not a camera unit:', unit.unit);
                 return;
             }
-        
+
             // Prevent rapid switching
             if (this.streamSwitchTimeout) {
                 clearTimeout(this.streamSwitchTimeout);
             }
-        
+
             // Close current video first
             if (this.currentVideo && this.currentVideo.visible) {
                 this.stopVideo();
             }
-        
+
             // Add small delay to ensure cleanup is complete
             this.streamSwitchTimeout = setTimeout(() => {
                 this._actualShowCameraStream(unit);
             }, 300);
         },
-        
+
         _actualShowCameraStream: function (unit) {
             console.log('Opening camera stream for:', unit.unit.callsign);
-            
+
             let streamUrl = unit.unit.streamUrl;
-            
+
             // Handle the new browser-published streams
             if (unit.unit.streamName) {
                 streamUrl = `http://localhost:8889/${unit.unit.streamName}`;
                 console.log('Using stream base URL:', streamUrl);
-                
+
                 // Check stream status
                 const status = this.getStreamStatus(unit.unit.streamName);
                 if (status === 'failed' || status === 'error') {
@@ -2078,13 +2171,13 @@ const app = Vue.createApp({
                     }
                 }
             }
-        
+
             if (!streamUrl) {
                 console.error('No stream URL found for camera unit');
                 alert('No stream URL configured for this camera');
                 return;
             }
-        
+
             // Set up currentVideo with enhanced info
             this.currentVideo = {
                 url: streamUrl,
@@ -2098,9 +2191,9 @@ const app = Vue.createApp({
                 status: this.getStreamStatus(unit.unit.streamName),
                 canStop: this.myActiveStreams && this.myActiveStreams.has(unit.unit.streamName)
             };
-        
+
             console.log('Camera stream opened:', streamUrl);
-        
+
             this.$nextTick(() => {
                 this.handleWebRTCStream(unit, streamUrl);
             });
@@ -2157,6 +2250,38 @@ const app = Vue.createApp({
                 });
             }
         },
+
+        // Add this method to debug your current situation
+        async debugRepository() {
+            console.log('=== REPOSITORY DEBUG ===');
+
+            if (this.currentFileRepository) {
+                console.log('Current repository UID:', this.currentFileRepository.uid);
+
+                // Fetch all files and see what we have
+                try {
+                    const response = await fetch('/Marti/sync/search');
+                    const data = await response.json();
+
+                    console.log('All files on server:');
+                    data.results.forEach((file, i) => {
+                        console.log(`${i + 1}. ${file.FileName}`, {
+                            Keywords: file.Keywords,
+                            MIMEType: file.MIMEType,
+                            Size: this.formatFileSize(file.Size),
+                            Hash: file.Hash.substring(0, 10) + '...'
+                        });
+                    });
+
+                } catch (error) {
+                    console.error('Debug failed:', error);
+                }
+            } else {
+                console.log('No repository currently open');
+            }
+
+            console.log('=== END DEBUG ===');
+        },
     },
 
     beforeUnmount() {
@@ -2167,7 +2292,7 @@ const app = Vue.createApp({
             this.hlsInstance.destroy();
         }
         this.destroyWebcamStream();
-        
+
         // Stop all active publishers
         if (this.activePublishers) {
             this.activePublishers.forEach((value, streamName) => {

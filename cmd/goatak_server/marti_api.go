@@ -272,6 +272,15 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 	username := Username(ctx)
 	user := app.users.Get(username)
 
+	// ✅ FIX: Extract keywords from form data
+	keywords := ctx.FormValue("keywords")
+
+	// Add debug logging
+	app.logger.Info("upload debug",
+		slog.String("filename", filename),
+		slog.String("keywords_received", keywords),
+		slog.String("content_type", ctx.Get(fiber.HeaderContentType)))
+
 	fh, err := ctx.FormFile("assetfile")
 	if err != nil {
 		app.logger.Error("error getting form file", slog.Any("error", err))
@@ -323,6 +332,12 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 			slog.String("path", videoPath),
 			slog.Int64("bytes", copied))
 
+		// ✅ FIX: Include repository keywords for videos
+		videoKeywords := "video,webcam-recording"
+		if keywords != "" {
+			videoKeywords = keywords + "," + videoKeywords
+		}
+
 		// Create a simple resource record
 		c := &model.Resource{
 			Scope:          user.GetScope(),
@@ -335,15 +350,23 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 			SubmissionUser: user.GetLogin(),
 			CreatorUID:     queryIgnoreCase(ctx, "creatorUid"),
 			Tool:           "webcam-recorder",
-			Keywords:       "video,webcam-recording",
+			Keywords:       videoKeywords, // ✅ FIX: Include all keywords
 			Expiration:     -1,
+		}
+
+		// ✅ FIX: Populate KwSet from Keywords string
+		c.KwSet = util.NewStringSet()
+		for _, kw := range strings.Split(videoKeywords, ",") {
+			if trimmed := strings.TrimSpace(kw); trimmed != "" {
+				c.KwSet.Add(trimmed)
+			}
 		}
 
 		err = app.dbm.Create(c)
 		return c, err
 	}
 
-	// Regular file upload logic (existing code stays the same)
+	// Regular file upload logic
 	f, err := fh.Open()
 	if err != nil {
 		app.logger.Error("error opening file", slog.Any("error", err))
@@ -373,8 +396,18 @@ func (app *App) uploadMultipart(ctx *fiber.Ctx, uid, hash, filename string, pack
 		SubmissionUser: user.GetLogin(),
 		CreatorUID:     queryIgnoreCase(ctx, "creatorUid"),
 		Tool:           "",
-		KwSet:          util.NewStringSet(),
+		Keywords:       keywords, // ✅ FIX: Use extracted keywords
 		Expiration:     -1,
+	}
+
+	// ✅ FIX: Populate KwSet from Keywords string
+	c.KwSet = util.NewStringSet()
+	if keywords != "" {
+		for _, kw := range strings.Split(keywords, ",") {
+			if trimmed := strings.TrimSpace(kw); trimmed != "" {
+				c.KwSet.Add(trimmed)
+			}
+		}
 	}
 
 	if pack {
@@ -390,8 +423,15 @@ func (app *App) uploadFile(ctx *fiber.Ctx, uid, filename string) (*model.Resourc
 	username := Username(ctx)
 	user := app.users.Get(username)
 
-	hash, n, err := app.files.PutFile(user.GetScope(), "", ctx.Context().RequestBodyStream())
+	// ✅ FIX: Extract keywords from form data
+	keywords := ctx.FormValue("keywords")
 
+	// Add debug logging
+	app.logger.Info("raw upload debug",
+		slog.String("filename", filename),
+		slog.String("keywords_received", keywords))
+
+	hash, n, err := app.files.PutFile(user.GetScope(), "", ctx.Context().RequestBodyStream())
 	if err != nil {
 		app.logger.Error("save file error", slog.Any("error", err))
 		return nil, err
@@ -408,12 +448,21 @@ func (app *App) uploadFile(ctx *fiber.Ctx, uid, filename string) (*model.Resourc
 		SubmissionUser: user.GetLogin(),
 		CreatorUID:     queryIgnoreCase(ctx, "creatorUid"),
 		Tool:           "",
-		Keywords:       "",
+		Keywords:       keywords, // ✅ FIX: Use extracted keywords
 		Expiration:     -1,
 	}
 
-	err = app.dbm.Create(c)
+	// ✅ FIX: Populate KwSet from Keywords string
+	c.KwSet = util.NewStringSet()
+	if keywords != "" {
+		for _, kw := range strings.Split(keywords, ",") {
+			if trimmed := strings.TrimSpace(kw); trimmed != "" {
+				c.KwSet.Add(trimmed)
+			}
+		}
+	}
 
+	err = app.dbm.Create(c)
 	return c, err
 }
 
@@ -521,7 +570,8 @@ func getSearchHandler(app *App) fiber.Handler {
 		res := make([]*model.ResourceDTO, 0, len(files))
 
 		for _, f := range files {
-			if !f.KwSet.Has(kw) {
+			// ✅ FIX: Only filter by keywords if a keyword is specified
+			if kw != "" && !f.KwSet.Has(kw) {
 				continue
 			}
 
