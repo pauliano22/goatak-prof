@@ -47,6 +47,11 @@ const app = Vue.createApp({
             selectedFiles: null,
             uploadProgress: 0,
             isUploading: false,
+            // Add this new line:
+            activePublishers: new Map(),
+            // Add these new properties to your data function
+            activeStreamStatus: new Map(), // Track stream connection states
+            myActiveStreams: new Set(), // Track streams published by this user
         }
     },
 
@@ -76,6 +81,12 @@ const app = Vue.createApp({
         // Cleanup webcam when page unloads
         window.addEventListener('beforeunload', () => {
             this.destroyWebcamStream();
+            // Stop all active publishers
+            if (this.activePublishers) {
+                this.activePublishers.forEach((value, streamName) => {
+                    this.stopPublishing(streamName);
+                });
+            }
         });
     },
 
@@ -488,115 +499,162 @@ const app = Vue.createApp({
             }
         },
 
-        // NEW CAMERA METHODS
+        // NEW CAMERA METHODS - Updated for live webcam streaming with quality selection
         async addCameraPoint(latlng) {
-            // const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://147.177.46.185:8889/camera1/whep");
-            
-            // Use localhost for testing
-            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://localhost:8889/camera1/whep");
-            
-            if (!streamUrl) {
-                return; // User cancelled
-            }
-            
-            let uid = uuidv4();
-            let now = new Date();
-            let stale = new Date(now);
-            stale.setDate(stale.getDate() + 365);
-
-            // Use the proper detectStreamType function
-            const streamType = this.detectStreamType(streamUrl);
-
-            let u = {
-                uid: uid,
-                category: "point",
-                callsign: "Camera-" + this.point_num++,
-                sidc: "",
-                start_time: now,
-                last_seen: now,
-                stale_time: stale,
-                type: "b-m-p-s-p-v", // CoT Camera Feed type
-                lat: latlng.lat,
-                lon: latlng.lng,
-                hae: 0,
-                speed: 0,
-                course: 0,
-                status: "",
-                // STORE STREAM INFO IN STANDARD TEXT FIELD AS JSON:
-                text: JSON.stringify({
-                    description: "Camera feed",
-                    streamUrl: streamUrl,
-                    streamType: streamType
-                }),
-                parent_uid: "",
-                parent_callsign: "",
-                color: "#0066cc",
-                send: true,
-                local: true,
+            try {
+                // Ask user if they want to stream live webcam or enter a URL
+                const choice = confirm("Do you want to stream your live webcam?\n\nClick OK for live webcam\nClick Cancel to enter a stream URL");
                 
-                // Keep these for local client only:
-                isCamera: true,
-                streamUrl: streamUrl,
-                streamType: streamType
-            }
+                if (choice) {
+                    // Video quality selection
+                    const qualityOptions = {
+                        "1": { width: 640, height: 480, label: "Low (640x480)" },
+                        "2": { width: 1280, height: 720, label: "Medium (1280x720)" },
+                        "3": { width: 1920, height: 1080, label: "High (1920x1080)" }
+                    };
+                    
+                    const qualityChoice = prompt("Choose video quality:\n1 = Low (640x480)\n2 = Medium (1280x720)\n3 = High (1920x1080)", "2");
+                    const selectedQuality = qualityOptions[qualityChoice] || qualityOptions["2"];
+                    
+                    // Get user's webcam stream with selected quality
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { 
+                            width: selectedQuality.width, 
+                            height: selectedQuality.height,
+                            frameRate: 30
+                        },
+                        audio: true
+                    });
 
-            if (this.config && this.config.uid) {
-                u.parent_uid = this.config.uid;
-                u.parent_callsign = this.config.callsign;
-            }
+                    // Generate unique stream name
+                    const streamName = `camera_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    const streamUrl = `http://localhost:8889/${streamName}`;
 
-            let unit = new Unit(this, u);
-            this.units.set(unit.uid, unit);
-            unit.post();
+                    // Start publishing to MediaMTX
+                    await this.publishStreamToMediaMTX(stream, streamName);
 
-            this.setCurrentUnitUid(u.uid, true);
-        },
+                    // Create the camera point with the stream URL
+                    let uid = uuidv4();
+                    let now = new Date();
+                    let stale = new Date(now);
+                    stale.setDate(stale.getDate() + 365);
 
-        showCameraStream: function (unit) {
-            if (!unit.unit.isCamera && unit.unit.type !== "b-m-p-s-p-v") {
-                console.log('Not a camera unit:', unit.unit);
-                return;
-            }
+                    let u = {
+                        uid: uid,
+                        category: "point",
+                        callsign: "Live-Cam-" + this.point_num++,
+                        sidc: "",
+                        start_time: now,
+                        last_seen: now,
+                        stale_time: stale,
+                        type: "b-m-p-s-p-v",
+                        lat: latlng.lat,
+                        lon: latlng.lng,
+                        hae: 0,
+                        speed: 0,
+                        course: 0,
+                        status: "",
+                        text: JSON.stringify({
+                            description: "Live webcam feed",
+                            streamUrl: streamUrl,
+                            streamType: "webrtc",
+                            streamName: streamName,
+                            quality: selectedQuality.label,
+                            status: "active",
+                            publisher: this.config?.callsign || "Unknown"
+                        }),
+                        parent_uid: "",
+                        parent_callsign: "",
+                        color: "#0066cc",
+                        send: true,
+                        local: true,
+                        isCamera: true,
+                        streamUrl: streamUrl,
+                        streamType: "webrtc",
+                        streamName: streamName
+                    };
 
-            console.log('Opening camera stream for:', unit.unit.callsign);
-            console.log('Stream URL:', unit.unit.streamUrl);
+                    if (this.config && this.config.uid) {
+                        u.parent_uid = this.config.uid;
+                        u.parent_callsign = this.config.callsign;
+                    }
 
-            const streamUrl = unit.unit.streamUrl;
+                    let unit = new Unit(this, u);
+                    this.units.set(unit.uid, unit);
+                    unit.post();
 
-            if (!streamUrl) {
-                console.error('No stream URL found for camera unit');
-                alert('No stream URL configured for this camera');
-                return;
-            }
+                    this.setCurrentUnitUid(u.uid, true);
 
-            // Determine stream type
-            let streamType = 'video';
-            if (streamUrl.includes(':9001/')) streamType = 'webrtc';
-            else if (streamUrl.includes('.m3u8')) streamType = 'hls';
-            else if (streamUrl.startsWith('rtsp://')) streamType = 'rtsp';
+                    console.log('Live camera point created and streaming to:', streamUrl);
+                    alert(`Live camera streaming started!\nStream: ${streamName}\nQuality: ${selectedQuality.label}\nOthers can now view your camera feed.`);
 
-            // Set up currentVideo
-            this.currentVideo = {
-                url: streamUrl,
-                visible: true,
-                isLive: true,
-                isWebRTC: streamType === 'webrtc',
-                isHLS: streamType === 'hls',
-                isRTSP: streamType === 'rtsp',
-                title: unit.unit.callsign
-            };
+                } else {
+                    // Manual URL entry (existing functionality)
+                    const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://localhost:8889/camera1/whep");
+                    
+                    if (!streamUrl) {
+                        return; // User cancelled
+                    }
+                    
+                    let uid = uuidv4();
+                    let now = new Date();
+                    let stale = new Date(now);
+                    stale.setDate(stale.getDate() + 365);
 
-            console.log('Camera stream opened:', streamUrl, 'Type:', streamType);
+                    // Use the proper detectStreamType function
+                    const streamType = this.detectStreamType(streamUrl);
 
-            // Handle WebRTC streams (your MediaMTX server)
-            if (streamType === 'webrtc') {
-                this.$nextTick(() => {
-                    this.handleWebRTCStream(unit, streamUrl);
-                });
-            } else if (streamType === 'hls') {
-                this.$nextTick(() => {
-                    this.handleHLSStream(unit, streamUrl);
-                });
+                    let u = {
+                        uid: uid,
+                        category: "point",
+                        callsign: "Camera-" + this.point_num++,
+                        sidc: "",
+                        start_time: now,
+                        last_seen: now,
+                        stale_time: stale,
+                        type: "b-m-p-s-p-v",
+                        lat: latlng.lat,
+                        lon: latlng.lng,
+                        hae: 0,
+                        speed: 0,
+                        course: 0,
+                        status: "",
+                        text: JSON.stringify({
+                            description: "Camera feed",
+                            streamUrl: streamUrl,
+                            streamType: streamType
+                        }),
+                        parent_uid: "",
+                        parent_callsign: "",
+                        color: "#0066cc",
+                        send: true,
+                        local: true,
+                        isCamera: true,
+                        streamUrl: streamUrl,
+                        streamType: streamType
+                    };
+
+                    if (this.config && this.config.uid) {
+                        u.parent_uid = this.config.uid;
+                        u.parent_callsign = this.config.callsign;
+                    }
+
+                    let unit = new Unit(this, u);
+                    this.units.set(unit.uid, unit);
+                    unit.post();
+
+                    this.setCurrentUnitUid(u.uid, true);
+                }
+
+            } catch (error) {
+                console.error('Error creating camera stream:', error);
+                
+                // Better error messages with MediaMTX setup guidance
+                if (error.message.includes('fetch')) {
+                    alert(`Could not connect to MediaMTX server.\n\nPlease ensure:\n1. MediaMTX is running on localhost:8889\n2. WHIP/WHEP is enabled in mediamtx.yml:\n   webrtc: yes\n   whip: yes\n   whep: yes\n\nError: ${error.message}`);
+                } else {
+                    alert('Could not access webcam: ' + error.message);
+                }
             }
         },
 
@@ -721,18 +779,14 @@ const app = Vue.createApp({
                 this.uploadProgress = Math.round(((i + 1) / this.selectedFiles.length) * 100);
         
                 try {
-                    // Add repository UID to filename to associate with this repository
                     const modifiedFileName = `${repositoryUid}_${file.name}`;
                     
                     const formData = new FormData();
-                    // USE EXACT SAME PATTERN AS saveStandaloneRecording
                     formData.append('assetfile', file, modifiedFileName);
         
-                    // USE EXACT SAME PATTERN - name query parameter
                     const response = await fetch(`/Marti/sync/upload?name=${encodeURIComponent(modifiedFileName)}`, {
                         method: 'POST',
                         body: formData
-                        // DO NOT set Content-Type header - browser must set it automatically with boundary
                     });
         
                     if (response.ok) {
@@ -754,17 +808,12 @@ const app = Vue.createApp({
             this.uploadProgress = 0;
             this.selectedFiles = null;
         
-            // Show results
             let message = `Upload complete!\nSuccessful: ${successfulUploads.length}`;
             if (failedUploads.length > 0) {
                 message += `\nFailed: ${failedUploads.length}`;
-                if (failedUploads.length <= 5) {
-                    message += '\nFailed files: ' + failedUploads.join(', ');
-                }
             }
             alert(message);
         
-            // Reload repository files
             await this.loadRepositoryFiles(repositoryUid);
         },
 
@@ -775,11 +824,9 @@ const app = Vue.createApp({
         async downloadFile(file) {
             try {
                 const downloadUrl = `/Marti/sync/content?hash=${file.Hash}`;
-
-                // Create temporary link and trigger download
                 const link = document.createElement('a');
                 link.href = downloadUrl;
-                link.download = file.FileName.replace(/^[^_]*_/, ''); // Remove repository UID prefix
+                link.download = file.FileName.replace(/^[^_]*_/, '');
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -791,22 +838,18 @@ const app = Vue.createApp({
 
         async viewFile(file) {
             if (file.MIMEType && file.MIMEType.startsWith('video/')) {
-                // Open video in existing video overlay
                 const videoUrl = `/Marti/sync/content?hash=${file.Hash}`;
                 this.currentVideo = {
                     url: videoUrl,
                     visible: true,
-                    title: file.FileName.replace(/^[^_]*_/, ''), // Remove repository UID prefix
+                    title: file.FileName.replace(/^[^_]*_/, ''),
                     isLive: false
                 };
-                // Hide file repository modal
                 this.currentFileRepository.visible = false;
             } else if (file.MIMEType && file.MIMEType.startsWith('image/')) {
-                // Open image in new tab/window
                 const imageUrl = `/Marti/sync/content?hash=${file.Hash}`;
                 window.open(imageUrl, '_blank');
             } else {
-                // Download other file types
                 await this.downloadFile(file);
             }
         },
@@ -817,7 +860,6 @@ const app = Vue.createApp({
             }
 
             try {
-                // Note: Marti API might not have delete endpoint, this is a placeholder
                 const response = await fetch(`/Marti/sync/delete?hash=${file.Hash}`, {
                     method: 'DELETE'
                 });
@@ -837,7 +879,7 @@ const app = Vue.createApp({
         closeFileRepository() {
             this.currentFileRepository = null;
             this.repositoryFiles = [];
-            this.selectedFiles = null;
+            this.selectedFiles = [];
             this.uploadProgress = 0;
             this.isUploading = false;
         },
@@ -852,75 +894,11 @@ const app = Vue.createApp({
 
         getFileIcon(file) {
             if (!file.MIMEType) return 'bi-file-earmark';
-
             if (file.MIMEType.startsWith('video/')) return 'bi-file-play';
             if (file.MIMEType.startsWith('image/')) return 'bi-file-image';
             if (file.MIMEType.startsWith('audio/')) return 'bi-file-music';
             if (file.MIMEType.includes('pdf')) return 'bi-file-pdf';
-            if (file.MIMEType.includes('word')) return 'bi-file-word';
-            if (file.MIMEType.includes('excel') || file.MIMEType.includes('spreadsheet')) return 'bi-file-excel';
-            if (file.MIMEType.includes('powerpoint') || file.MIMEType.includes('presentation')) return 'bi-file-ppt';
-            if (file.MIMEType.includes('zip') || file.MIMEType.includes('rar') || file.MIMEType.includes('7z')) return 'bi-file-zip';
-
             return 'bi-file-earmark';
-        },
-        addCameraPoint: function (latlng) {
-            const streamUrl = prompt("Enter stream URL (RTSP, HLS, WebRTC, or regular video):", "http://localhost:9001/webcam");
-            if (!streamUrl) {
-                return; // User cancelled
-            }
-
-            let uid = uuidv4();
-            let now = new Date();
-            let stale = new Date(now);
-            stale.setDate(stale.getDate() + 365);
-
-            // Simple stream type detection
-            let streamType = 'video';
-            if (streamUrl.toLowerCase().startsWith('rtsp://')) streamType = 'rtsp';
-            else if (streamUrl.includes('.m3u8')) streamType = 'hls';
-            else if (streamUrl.includes(':9001/')) streamType = 'webrtc';
-
-            let u = {
-                uid: uid,
-                category: "point",
-                callsign: "Camera-" + this.point_num++,
-                sidc: "",
-                start_time: now,
-                last_seen: now,
-                stale_time: stale,
-                type: "b-m-p-s-p-v",
-                lat: latlng.lat,
-                lon: latlng.lng,
-                hae: 0,
-                speed: 0,
-                course: 0,
-                status: "",
-                text: JSON.stringify({
-                    description: "Camera feed",
-                    streamUrl: streamUrl,
-                    streamType: streamType
-                }),
-                parent_uid: "",
-                parent_callsign: "",
-                color: "#0066cc",
-                send: true,
-                local: true,
-                isCamera: true,
-                streamUrl: streamUrl,
-                streamType: streamType
-            }
-
-            if (this.config && this.config.uid) {
-                u.parent_uid = this.config.uid;
-                u.parent_callsign = this.config.callsign;
-            }
-
-            let unit = new Unit(this, u);
-            this.units.set(unit.uid, unit);
-            unit.post();
-
-            this.setCurrentUnitUid(u.uid, true);
         },
 
         async handleWebcamStream(unit) {
@@ -1165,51 +1143,90 @@ const app = Vue.createApp({
             if (!videoElement) {
                 throw new Error('Video element not found');
             }
-
+        
             console.log('Setting up WebRTC for video element:', videoElement);
-
+        
             // Clean up existing connection
             if (this.webrtcPeerConnection) {
                 this.webrtcPeerConnection.close();
             }
-
+        
             this.webrtcPeerConnection = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
             });
-
+        
+            // CRITICAL: Add transceiver for receiving video
+            this.webrtcPeerConnection.addTransceiver('video', { direction: 'recvonly' });
+            this.webrtcPeerConnection.addTransceiver('audio', { direction: 'recvonly' });
+        
             this.webrtcPeerConnection.ontrack = (event) => {
-                console.log('Received WebRTC track');
+                console.log('Received WebRTC track:', event.track.kind);
                 videoElement.srcObject = event.streams[0];
                 videoElement.play().catch(console.error);
             };
-
-            const offer = await this.webrtcPeerConnection.createOffer();
-            await this.webrtcPeerConnection.setLocalDescription(offer);
-
-            // FIX: Clean up URL and build WHEP endpoint properly
-            const cleanUrl = streamUrl.replace(/\/$/, ''); // Remove trailing slash
-            const whepUrl = cleanUrl + '/whep';
-
-            console.log('Connecting to WHEP endpoint:', whepUrl);
-
-            // Connect to MediaMTX WebRTC endpoint
-            const response = await fetch(whepUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/sdp' },
-                body: offer.sdp
-            });
-
-            if (response.ok) {
-                const answerSdp = await response.text();
-                await this.webrtcPeerConnection.setRemoteDescription({
-                    type: 'answer',
-                    sdp: answerSdp
+        
+            this.webrtcPeerConnection.oniceconnectionstatechange = () => {
+                console.log('ICE connection state:', this.webrtcPeerConnection.iceConnectionState);
+            };
+        
+            this.webrtcPeerConnection.onconnectionstatechange = () => {
+                console.log('Connection state:', this.webrtcPeerConnection.connectionState);
+            };
+        
+            try {
+                // Create offer with proper constraints
+                const offer = await this.webrtcPeerConnection.createOffer({
+                    offerToReceiveVideo: true,
+                    offerToReceiveAudio: true
                 });
-                console.log('WebRTC connection established');
-            } else {
-                const errorText = await response.text();
-                console.error('WHEP response:', response.status, errorText);
-                throw new Error(`WebRTC connection failed: ${response.status} - ${errorText}`);
+                
+                await this.webrtcPeerConnection.setLocalDescription(offer);
+        
+                // Wait for ICE gathering to complete
+                await new Promise((resolve) => {
+                    if (this.webrtcPeerConnection.iceGatheringState === 'complete') {
+                        resolve();
+                    } else {
+                        this.webrtcPeerConnection.addEventListener('icegatheringstatechange', () => {
+                            if (this.webrtcPeerConnection.iceGatheringState === 'complete') {
+                                resolve();
+                            }
+                        });
+                    }
+                });
+        
+                // Build WHEP endpoint
+                const whepUrl = streamUrl + '/whep';
+                console.log('Connecting to WHEP endpoint:', whepUrl);
+        
+                // Send offer to MediaMTX
+                const response = await fetch(whepUrl, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/sdp',
+                        'Accept': 'application/sdp'
+                    },
+                    body: this.webrtcPeerConnection.localDescription.sdp
+                });
+        
+                if (response.ok) {
+                    const answerSdp = await response.text();
+                    console.log('Received answer SDP:', answerSdp.substring(0, 200) + '...');
+                    
+                    await this.webrtcPeerConnection.setRemoteDescription({
+                        type: 'answer',
+                        sdp: answerSdp
+                    });
+                    
+                    console.log('WebRTC connection established');
+                } else {
+                    const errorText = await response.text();
+                    console.error('WHEP response:', response.status, errorText);
+                    throw new Error(`WebRTC connection failed: ${response.status} - ${errorText}`);
+                }
+            } catch (error) {
+                console.error('WebRTC setup error:', error);
+                throw error;
             }
         },
 
@@ -1805,7 +1822,262 @@ const app = Vue.createApp({
             
             // Default to regular video
             return 'video';
-        }
+        },
+
+        async publishStreamToMediaMTX(stream, streamName) {
+            try {
+                // Create WebRTC peer connection for publishing
+                const pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+
+                // Add the webcam stream to the peer connection
+                stream.getTracks().forEach(track => {
+                    pc.addTrack(track, stream);
+                    console.log('Added track:', track.kind);
+                });
+
+                // Connection state logging
+                pc.oniceconnectionstatechange = () => {
+                    console.log('Publisher ICE connection state:', pc.iceConnectionState);
+                    this.activeStreamStatus.set(streamName, pc.iceConnectionState);
+                    
+                    if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+                        console.log('Publisher connection failed/disconnected for:', streamName);
+                        this.activeStreamStatus.set(streamName, 'failed');
+                        
+                        // Attempt to reconnect after 3 seconds
+                        setTimeout(() => {
+                            if (this.activePublishers.has(streamName)) {
+                                console.log('Attempting to reconnect stream:', streamName);
+                                this.republishStream(streamName, stream);
+                            }
+                        }, 3000);
+                    } else if (pc.iceConnectionState === 'connected') {
+                        this.activeStreamStatus.set(streamName, 'connected');
+                    }
+                };
+
+                // Create offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // Wait for ICE gathering
+                await new Promise((resolve) => {
+                    if (pc.iceGatheringState === 'complete') {
+                        resolve();
+                    } else {
+                        pc.addEventListener('icegatheringstatechange', () => {
+                            if (pc.iceGatheringState === 'complete') {
+                                resolve();
+                            }
+                        });
+                    }
+                });
+
+                // Send offer to MediaMTX WHIP endpoint
+                const whipUrl = `http://localhost:8889/${streamName}/whip`;
+                
+                console.log('Publishing to WHIP endpoint:', whipUrl);
+
+                const response = await fetch(whipUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/sdp',
+                        'Accept': 'application/sdp'
+                    },
+                    body: pc.localDescription.sdp
+                });
+
+                if (!response.ok) {
+                    throw new Error(`WHIP request failed: ${response.status} ${response.statusText}\n\nPlease check that MediaMTX is running with WHIP enabled.`);
+                }
+
+                // Get answer from MediaMTX
+                const answerSdp = await response.text();
+                console.log('Received WHIP answer SDP:', answerSdp.substring(0, 200) + '...');
+                
+                await pc.setRemoteDescription({
+                    type: 'answer',
+                    sdp: answerSdp
+                });
+
+                // Store the peer connection for cleanup later
+                this.activePublishers.set(streamName, { pc, stream });
+                this.myActiveStreams.add(streamName);
+                this.activeStreamStatus.set(streamName, 'connected');
+
+                console.log('Successfully started publishing stream:', streamName);
+                return true;
+
+            } catch (error) {
+                console.error('Failed to publish stream to MediaMTX:', error);
+                this.activeStreamStatus.set(streamName, 'error');
+                throw error;
+            }
+        },
+
+        // Method for reconnection attempts
+        async republishStream(streamName, stream) {
+            try {
+                console.log('Republishing stream:', streamName);
+                
+                // Remove old connection
+                if (this.activePublishers.has(streamName)) {
+                    const { pc } = this.activePublishers.get(streamName);
+                    pc.close();
+                    this.activePublishers.delete(streamName);
+                }
+                
+                // Republish
+                await this.publishStreamToMediaMTX(stream, streamName);
+                console.log('Stream reconnected successfully:', streamName);
+                
+            } catch (error) {
+                console.error('Failed to reconnect stream:', streamName, error);
+                this.activeStreamStatus.set(streamName, 'reconnect_failed');
+            }
+        },
+
+        // Method to stop a user's own published stream
+        async stopMyStream(unit) {
+            if (!unit.unit.streamName) {
+                alert('This camera point does not have an active stream.');
+                return;
+            }
+            
+            if (!this.myActiveStreams.has(unit.unit.streamName)) {
+                alert('You can only stop streams that you started.');
+                return;
+            }
+            
+            if (confirm(`Stop streaming for ${unit.unit.callsign}?`)) {
+                // Stop the publisher
+                this.stopPublishing(unit.unit.streamName);
+                
+                // Update the unit status
+                try {
+                    const textData = JSON.parse(unit.unit.text);
+                    textData.status = 'stopped';
+                    textData.stoppedAt = new Date().toISOString();
+                    
+                    unit.unit.text = JSON.stringify(textData);
+                    unit.unit.color = "#666666"; // Gray out stopped cameras
+                    unit.post();
+                    
+                    alert('Stream stopped successfully.');
+                } catch (e) {
+                    console.error('Error updating unit status:', e);
+                }
+            }
+        },
+
+        // Get stream status for UI display
+        getStreamStatus(streamName) {
+            return this.activeStreamStatus.get(streamName) || 'unknown';
+        },
+
+        // Enhanced stop publishing with cleanup
+        stopPublishing(streamName) {
+            if (this.activePublishers && this.activePublishers.has(streamName)) {
+                const { pc, stream } = this.activePublishers.get(streamName);
+                
+                // Stop all tracks
+                stream.getTracks().forEach(track => track.stop());
+                
+                // Close peer connection
+                pc.close();
+                
+                // Remove from active publishers and status tracking
+                this.activePublishers.delete(streamName);
+                this.myActiveStreams.delete(streamName);
+                this.activeStreamStatus.delete(streamName);
+                
+                console.log('Stopped publishing stream:', streamName);
+            }
+        },
+
+        showCameraStream: function (unit) {
+            if (!unit.unit.isCamera && unit.unit.type !== "b-m-p-s-p-v") {
+                console.log('Not a camera unit:', unit.unit);
+                return;
+            }
+        
+            console.log('Opening camera stream for:', unit.unit.callsign);
+            
+            let streamUrl = unit.unit.streamUrl;
+            
+            // Handle the new browser-published streams
+            if (unit.unit.streamName) {
+                // FIXED: Don't add /whep here - that gets added in setupWebRTCPlayer
+                streamUrl = `http://localhost:8889/${unit.unit.streamName}`;
+                console.log('Using stream base URL:', streamUrl);
+                
+                // Check stream status
+                const status = this.getStreamStatus(unit.unit.streamName);
+                if (status === 'failed' || status === 'error') {
+                    if (!confirm(`Stream status: ${status}. Try to view anyway?`)) {
+                        return;
+                    }
+                }
+            }
+        
+            if (!streamUrl) {
+                console.error('No stream URL found for camera unit');
+                alert('No stream URL configured for this camera');
+                return;
+            }
+        
+            // Set up currentVideo with enhanced info
+            this.currentVideo = {
+                url: streamUrl,
+                visible: true,
+                isLive: true,
+                isWebRTC: true,
+                isHLS: false,
+                isRTSP: false,
+                title: unit.unit.callsign,
+                streamName: unit.unit.streamName,
+                status: this.getStreamStatus(unit.unit.streamName),
+                canStop: this.myActiveStreams.has(unit.unit.streamName) // Can user stop this stream?
+            };
+        
+            console.log('Camera stream opened:', streamUrl);
+        
+            this.$nextTick(() => {
+                this.handleWebRTCStream(unit, streamUrl);
+            });
+        },
+
+        // Helper method to stop stream from video overlay
+        stopMyStreamFromVideo() {
+            if (this.currentVideo && this.currentVideo.streamName) {
+                // Find the unit with this stream name
+                for (let unit of this.units.values()) {
+                    if (unit.unit.streamName === this.currentVideo.streamName) {
+                        this.stopMyStream(unit);
+                        this.stopVideo(); // Close the video overlay
+                        break;
+                    }
+                }
+            }
+        },
+
+        copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('URL copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                alert('URL copied to clipboard!');
+            });
+        },
     },
 
     beforeUnmount() {
@@ -1816,6 +2088,13 @@ const app = Vue.createApp({
             this.hlsInstance.destroy();
         }
         this.destroyWebcamStream();
+        
+        // Stop all active publishers
+        if (this.activePublishers) {
+            this.activePublishers.forEach((value, streamName) => {
+                this.stopPublishing(streamName);
+            });
+        }
     }
 });
 

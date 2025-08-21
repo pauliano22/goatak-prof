@@ -419,11 +419,20 @@
                                         class="bi bi-chat-text-fill"></i></button>
                             </div>
                             <div v-else>
-                                <!-- Camera stream button for camera points -->
+                                <!-- Enhanced camera stream button with stop capability -->
                                 <button v-if="current_unit.unit.isCamera || current_unit.unit.type === 'b-m-p-s-p-v'"
                                     class="btn btn-sm btn-outline-info ms-1 fw-regular"
                                     @click="showCameraStream(current_unit)" title="View Camera Stream">
                                     <i class="bi bi-camera-video"></i>
+                                </button>
+
+                                <!-- Stop My Stream button (only show for own streams) -->
+                                <button v-if="(current_unit.unit.isCamera || current_unit.unit.type === 'b-m-p-s-p-v') && 
+                                              current_unit.unit.streamName && 
+                                              myActiveStreams.has(current_unit.unit.streamName)"
+                                    class="btn btn-sm btn-outline-warning ms-1 fw-regular"
+                                    @click="stopMyStream(current_unit)" title="Stop My Stream">
+                                    <i class="bi bi-broadcast-pin"></i>
                                 </button>
 
                                 <!-- File repository button for file repository points -->
@@ -512,6 +521,26 @@
             <div class="video-container">
                 <div class="video-title">{{ currentVideo.title || 'Camera Stream' }}</div>
                 <div class="video-controls">
+                    <!-- Stream Status Indicator -->
+                    <div v-if="currentVideo.streamName" class="stream-status mb-2">
+                        <span class="badge" 
+                              :class="{
+                                  'bg-success': currentVideo.status === 'connected',
+                                  'bg-warning': currentVideo.status === 'connecting',
+                                  'bg-danger': currentVideo.status === 'failed' || currentVideo.status === 'error',
+                                  'bg-secondary': currentVideo.status === 'unknown'
+                              }">
+                            {{ currentVideo.status || 'unknown' }}
+                        </span>
+                    </div>
+
+                    <!-- Stop Stream Button (only for own streams) -->
+                    <div v-if="currentVideo.canStop" class="btn-group me-2">
+                        <button class="btn btn-sm btn-warning fw-medium" @click="stopMyStreamFromVideo()">
+                            <i class="bi bi-broadcast-pin"></i> Stop My Stream
+                        </button>
+                    </div>
+
                     <!-- Recording controls for standalone recording -->
                     <div v-if="currentVideo.isStandaloneRecording" class="btn-group me-2">
                         <button class="btn btn-sm btn-warning fw-medium" @click="stopStandaloneRecording()">
@@ -540,8 +569,8 @@
                     Your browser does not support video playback.
                 </video>
 
-                <!-- Webcam Video -->
-                <video v-if="currentVideo.isWebcam" ref="webcamVideo" autoplay muted playsinline>
+                <!-- Webcam/WebRTC Video - REMOVE src attribute -->
+                <video v-if="currentVideo.isWebcam || currentVideo.isWebRTC" ref="webcamVideo" autoplay muted playsinline>
                     Your browser does not support video playback.
                 </video>
 
@@ -577,7 +606,7 @@
                         <h6 class="mb-2"><i class="bi bi-gear"></i> Recommended Solutions:</h6>
                         <ul class="mb-0">
                             <li class="mb-1">Use <strong>MediaMTX</strong> to convert RTSP to WebRTC/HLS</li>
-                            <li class="mb-1">Set up an <strong>RTMP/HLS streaming server</strong></li>
+                            <li class="mb-1">Set up an <strong>RTMP/HLS streaming server</li>
                             <li class="mb-1">Use dedicated <strong>IP camera viewing software</strong></li>
                         </ul>
                     </div>
@@ -701,7 +730,7 @@
                                                         @click="viewFile(file)"
                                                         :title="file.MIMEType && (file.MIMEType.startsWith('video/') || file.MIMEType.startsWith('image/')) ? 'View' : 'Download'">
                                                         <i class="bi"
-                                                            :class="file.MIMEType && file.MIMEType.startsWith('video/') ? 'bi-play-circle' : file.MIMEType && file.MIMEType.startsWith('image/') ? 'bi-eye' : 'bi-download'"></i>
+                                                            :class="file.MIMEType && file.MIMEType.startsWith('video/') || file.MIMEType.startsWith('image/') ? 'bi-eye' : 'bi-download'"></i>
                                                     </button>
                                                     <button class="btn btn-outline-secondary fw-regular"
                                                         @click="downloadFile(file)" title="Download">
@@ -853,10 +882,10 @@
                             <!-- Camera stream URL field for camera points -->
                             <div class="row m-2" v-if="form_unit.type === 'b-m-p-s-p-v'">
                                 <div class="col-12">
-                                    <label for="ed-stream-url" class="form-label fw-medium">Stream URL</label>
-                                    <input type="text" class="form-control fw-regular" id="ed-stream-url"
-                                        v-model="form_unit.streamUrl"
-                                        placeholder="rtsp://example.com/stream or http://example.com/stream.m3u8">
+                                    <label for="ed-stream-url" class="fw-medium">Stream URL</label>
+                                    <input class="form-control fw-regular" v-model="form_unit.streamUrl" id="ed-stream-url"
+                                        placeholder="Enter stream URL (RTSP, HLS, WebRTC, etc.)"
+                                        title="Supported: RTSP, HLS (.m3u8), WebRTC, regular video URLs, or 'webcam://live-stream' for local camera">
                                     <div class="form-text">
                                         Supported: RTSP, HLS (.m3u8), WebRTC, regular video URLs, or
                                         'webcam://live-stream' for local camera
