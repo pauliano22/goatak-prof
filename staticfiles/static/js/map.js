@@ -52,6 +52,9 @@ const app = Vue.createApp({
             // Add these new properties to your data function
             activeStreamStatus: new Map(), // Track stream connection states
             myActiveStreams: new Set(), // Track streams published by this user
+            streamSwitchTimeout: null,
+            // Add these properties to your data section
+            showPlayButton: false,
         }
     },
 
@@ -1146,27 +1149,63 @@ const app = Vue.createApp({
         
             console.log('Setting up WebRTC for video element:', videoElement);
         
-            // Clean up existing connection
+            // Clean up existing connection properly
             if (this.webrtcPeerConnection) {
+                console.log('Closing existing WebRTC connection');
                 this.webrtcPeerConnection.close();
+                this.webrtcPeerConnection = null;
             }
         
+            // Clear any existing video source and stop tracks
+            if (videoElement.srcObject) {
+                videoElement.srcObject.getTracks().forEach(track => track.stop());
+                videoElement.srcObject = null;
+            }
+        
+            // Clear any src attribute that might interfere
+            videoElement.removeAttribute('src');
+            videoElement.load(); // Reset video element
+        
             this.webrtcPeerConnection = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+                // Add these optimizations for better performance
+                bundlePolicy: 'max-bundle',
+                rtcpMuxPolicy: 'require',
+                // Optimize for low latency
+                iceTransportPolicy: 'all'
             });
         
-            // CRITICAL: Add transceiver for receiving video
-            this.webrtcPeerConnection.addTransceiver('video', { direction: 'recvonly' });
-            this.webrtcPeerConnection.addTransceiver('audio', { direction: 'recvonly' });
+            // Add transceivers for receiving
+            this.webrtcPeerConnection.addTransceiver('video', { 
+                direction: 'recvonly'
+            });
+            this.webrtcPeerConnection.addTransceiver('audio', { 
+                direction: 'recvonly'
+            });
         
             this.webrtcPeerConnection.ontrack = (event) => {
-                console.log('Received WebRTC track:', event.track.kind);
-                videoElement.srcObject = event.streams[0];
-                videoElement.play().catch(console.error);
+                console.log('Received WebRTC track:', event.track.kind, event.track.readyState);
+                if (event.streams && event.streams[0]) {
+                    console.log('Setting video srcObject');
+                    videoElement.srcObject = event.streams[0];
+                    
+                    // Add some delay to ensure stream is ready
+                    setTimeout(() => {
+                        videoElement.play().catch(e => {
+                            console.log('Auto-play failed (this is normal):', e.message);
+                            // Show a play button or instruction to user
+                        });
+                    }, 200);
+                }
             };
         
             this.webrtcPeerConnection.oniceconnectionstatechange = () => {
                 console.log('ICE connection state:', this.webrtcPeerConnection.iceConnectionState);
+                if (this.webrtcPeerConnection.iceConnectionState === 'connected') {
+                    console.log('WebRTC connection established successfully');
+                } else if (this.webrtcPeerConnection.iceConnectionState === 'failed') {
+                    console.error('WebRTC connection failed');
+                }
             };
         
             this.webrtcPeerConnection.onconnectionstatechange = () => {
@@ -1174,7 +1213,6 @@ const app = Vue.createApp({
             };
         
             try {
-                // Create offer with proper constraints
                 const offer = await this.webrtcPeerConnection.createOffer({
                     offerToReceiveVideo: true,
                     offerToReceiveAudio: true
@@ -1182,24 +1220,10 @@ const app = Vue.createApp({
                 
                 await this.webrtcPeerConnection.setLocalDescription(offer);
         
-                // Wait for ICE gathering to complete
-                await new Promise((resolve) => {
-                    if (this.webrtcPeerConnection.iceGatheringState === 'complete') {
-                        resolve();
-                    } else {
-                        this.webrtcPeerConnection.addEventListener('icegatheringstatechange', () => {
-                            if (this.webrtcPeerConnection.iceGatheringState === 'complete') {
-                                resolve();
-                            }
-                        });
-                    }
-                });
-        
-                // Build WHEP endpoint
+                // Use trickle ICE - don't wait for complete gathering
                 const whepUrl = streamUrl + '/whep';
                 console.log('Connecting to WHEP endpoint:', whepUrl);
         
-                // Send offer to MediaMTX
                 const response = await fetch(whepUrl, {
                     method: 'POST',
                     headers: { 
@@ -1211,21 +1235,25 @@ const app = Vue.createApp({
         
                 if (response.ok) {
                     const answerSdp = await response.text();
-                    console.log('Received answer SDP:', answerSdp.substring(0, 200) + '...');
+                    console.log('Received answer SDP, setting remote description');
                     
                     await this.webrtcPeerConnection.setRemoteDescription({
                         type: 'answer',
                         sdp: answerSdp
                     });
                     
-                    console.log('WebRTC connection established');
+                    console.log('WebRTC connection setup complete');
                 } else {
                     const errorText = await response.text();
-                    console.error('WHEP response:', response.status, errorText);
+                    console.error('WHEP response error:', response.status, errorText);
                     throw new Error(`WebRTC connection failed: ${response.status} - ${errorText}`);
                 }
             } catch (error) {
                 console.error('WebRTC setup error:', error);
+                if (this.webrtcPeerConnection) {
+                    this.webrtcPeerConnection.close();
+                    this.webrtcPeerConnection = null;
+                }
                 throw error;
             }
         },
@@ -1285,8 +1313,14 @@ const app = Vue.createApp({
         stopVideo() {
             console.log('Stopping video playback');
 
+            // Clear any pending stream switches
+            if (this.streamSwitchTimeout) {
+                clearTimeout(this.streamSwitchTimeout);
+                this.streamSwitchTimeout = null;
+            }
+
             // Stop standalone recording if active
-            if (this.standaloneRecording.isActive) {
+            if (this.standaloneRecording && this.standaloneRecording.isActive) {
                 this.stopStandaloneRecording();
             }
 
@@ -1297,6 +1331,7 @@ const app = Vue.createApp({
 
             // Clean up WebRTC
             if (this.webrtcPeerConnection) {
+                console.log('Closing WebRTC peer connection');
                 this.webrtcPeerConnection.close();
                 this.webrtcPeerConnection = null;
             }
@@ -1310,18 +1345,24 @@ const app = Vue.createApp({
             // Clean up webcam
             this.destroyWebcamStream();
 
-            // Clean up video element
+            // Clean up video element properly
             const videoElement = document.querySelector('.video-overlay video');
             if (videoElement) {
+                // Stop any tracks in srcObject
+                if (videoElement.srcObject) {
+                    videoElement.srcObject.getTracks().forEach(track => track.stop());
+                    videoElement.srcObject = null;
+                }
+                
                 videoElement.pause();
-                videoElement.src = '';
-                videoElement.srcObject = null;
-                videoElement.load();
+                videoElement.removeAttribute('src');
+                videoElement.load(); // Reset the video element
             }
 
             // Hide video modal
             if (this.currentVideo) {
                 this.currentVideo.visible = false;
+                this.currentVideo = null;
             }
         },
 
@@ -2003,13 +2044,29 @@ const app = Vue.createApp({
                 return;
             }
         
+            // Prevent rapid switching
+            if (this.streamSwitchTimeout) {
+                clearTimeout(this.streamSwitchTimeout);
+            }
+        
+            // Close current video first
+            if (this.currentVideo && this.currentVideo.visible) {
+                this.stopVideo();
+            }
+        
+            // Add small delay to ensure cleanup is complete
+            this.streamSwitchTimeout = setTimeout(() => {
+                this._actualShowCameraStream(unit);
+            }, 300);
+        },
+        
+        _actualShowCameraStream: function (unit) {
             console.log('Opening camera stream for:', unit.unit.callsign);
             
             let streamUrl = unit.unit.streamUrl;
             
             // Handle the new browser-published streams
             if (unit.unit.streamName) {
-                // FIXED: Don't add /whep here - that gets added in setupWebRTCPlayer
                 streamUrl = `http://localhost:8889/${unit.unit.streamName}`;
                 console.log('Using stream base URL:', streamUrl);
                 
@@ -2039,7 +2096,7 @@ const app = Vue.createApp({
                 title: unit.unit.callsign,
                 streamName: unit.unit.streamName,
                 status: this.getStreamStatus(unit.unit.streamName),
-                canStop: this.myActiveStreams.has(unit.unit.streamName) // Can user stop this stream?
+                canStop: this.myActiveStreams && this.myActiveStreams.has(unit.unit.streamName)
             };
         
             console.log('Camera stream opened:', streamUrl);
@@ -2077,6 +2134,28 @@ const app = Vue.createApp({
                 document.body.removeChild(textArea);
                 alert('URL copied to clipboard!');
             });
+        },
+
+        // Add these methods
+        onVideoLoadStart() {
+            console.log('Video load started');
+            this.showPlayButton = false;
+        },
+
+        onVideoCanPlay() {
+            console.log('Video can play');
+            this.showPlayButton = false;
+        },
+
+        manualPlay() {
+            const videoElement = document.querySelector('.video-overlay video');
+            if (videoElement) {
+                videoElement.play().then(() => {
+                    this.showPlayButton = false;
+                }).catch(e => {
+                    console.error('Manual play failed:', e);
+                });
+            }
         },
     },
 

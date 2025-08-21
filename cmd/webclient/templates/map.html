@@ -197,6 +197,14 @@
         .file-card:hover {
             transform: translateY(-2px);
         }
+
+        .manual-play-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10002;
+        }
     </style>
 </head>
 
@@ -563,16 +571,27 @@
                     </button>
                 </div>
 
-                <!-- Regular Video -->
-                <video v-if="!currentVideo.isWebcam && !currentVideo.isRTSP" :src="currentVideo.url" controls autoplay
-                    muted>
+                <!-- Regular Video (for non-WebRTC streams) -->
+                <video v-if="!currentVideo.isWebcam && !currentVideo.isRTSP && !currentVideo.isWebRTC" 
+                       :src="currentVideo.url" controls autoplay muted>
                     Your browser does not support video playback.
                 </video>
 
-                <!-- Webcam/WebRTC Video - REMOVE src attribute -->
-                <video v-if="currentVideo.isWebcam || currentVideo.isWebRTC" ref="webcamVideo" autoplay muted playsinline>
+                <!-- Webcam/WebRTC Video with manual play option -->
+                <video v-if="currentVideo.isWebcam || currentVideo.isWebRTC" 
+                       ref="webcamVideo" controls autoplay muted playsinline
+                       @canplay="onVideoCanPlay"
+                       @loadstart="onVideoLoadStart">
                     Your browser does not support video playback.
                 </video>
+
+                <!-- Manual play button for when autoplay fails -->
+                <div v-if="(currentVideo.isWebcam || currentVideo.isWebRTC) && showPlayButton" 
+                     class="manual-play-overlay">
+                    <button class="btn btn-primary btn-lg" @click="manualPlay">
+                        <i class="bi bi-play-circle"></i> Click to Play Stream
+                    </button>
+                </div>
 
                 <!-- Recording indicator for standalone recording -->
                 <div v-if="currentVideo.isStandaloneRecording && standaloneRecording.isActive"
